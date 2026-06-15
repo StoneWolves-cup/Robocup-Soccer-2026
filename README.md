@@ -12,7 +12,7 @@
 
 <h2 align=center>Team Name</h2>
 <p align=center> 
-Stone Wolves  <img src="Images/Logo.png" width ="250">
+Stone Wolves <br><img src="Images/Logo.png" width ="250">
 </p>
 
 <hr>
