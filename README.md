@@ -1,6 +1,13 @@
 
 <h1 align=center>Robocup-Soccer-2026</h1>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/RoboCup-2026-blue">
+  <img src="https://img.shields.io/badge/Category-Soccer_Infrared-green">
+  <img src="https://img.shields.io/badge/Country-Brazil-yellow">
+  <img src="https://img.shields.io/badge/Team-Stone_Wolves-orange">
+</p>
+
 <hr>
 
 <h2 align=center>Team Name</h2>
