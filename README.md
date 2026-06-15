@@ -11,7 +11,9 @@ Stone Wolves
 <hr>
 
 <h3 align=center>Logo</h3>
-
+<p align= center>
+<img src="logo_StoneWolves.png" width ="300">
+</p>
 <hr>
 
 <h2 align=center>Where the Team Was Founded</h2>
