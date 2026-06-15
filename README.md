@@ -111,7 +111,7 @@ Watch our robot playing.
 </p>
 
 <p align=center>
-  <img src="Images/Video_Robô.gif" width="250">
+  <a href="Images/Video_Robo">Click to Video</a>
 </p>
 
 <hr>
