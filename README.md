@@ -19,7 +19,7 @@ Stone Wolves
 
 <h3 align=center>Logo</h3>
 <p align= center>
-<img src="Images/logo_StoneWolves.png" width ="300">
+<img src="Images/Logo.png" width ="250">
 </p>
 <hr>
 
