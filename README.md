@@ -11,7 +11,7 @@
 <hr>
 
 <h2 align=center>Team Name</h2>
-<p align=center> 
+<p align=center width="150"> 
 Stone Wolves <br><img src="Images/Logo.png" width ="250">
 </p>
 
@@ -111,7 +111,7 @@ Watch our robot playing.
 </p>
 
 <p align=center>
-  <a href="Images/Video_Robo.mp4">Click to Video</a>
+  <a href="Images/Video.mp4">Click to Video</a>
 </p>
 
 <hr>
