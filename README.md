@@ -1,4 +1,4 @@
-```html
+
 <h1 align=center>Robocup-Soccer-2026</h1>
 
 <hr>
@@ -112,4 +112,3 @@ Watch our robot playing.
 </p>
 
 <hr>
-```
