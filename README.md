@@ -17,9 +17,9 @@ Stone Wolves <br><img src="Images/Logo.png" width ="250">
 
 <hr>
 
-<h2 align=center>Where the Team Was Founded</h2>
+<h2 align=center>Localization:</h2>
 <p align=center>
-Ribeirão Preto, São Paulo, Brazil 🇧🇷
+Ribeirão Preto, São Paulo, Brazil
 </p>
 
 <hr>
