@@ -11,16 +11,10 @@
 <hr>
 
 <h2 align=center>Team Name</h2>
-<p align=center>
-Stone Wolves
+<p align=center> 
+Stone Wolves  <img src="Images/Logo.png" width ="250">
 </p>
 
-<hr>
-
-<h3 align=center>Logo</h3>
-<p align= center>
-<img src="Images/Logo.png" width ="250">
-</p>
 <hr>
 
 <h2 align=center>Where the Team Was Founded</h2>
