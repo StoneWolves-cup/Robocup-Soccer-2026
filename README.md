@@ -75,7 +75,7 @@ Yuri Rezende
 <h2 align=center>Team Photo</h2>
 
 <p align=center>
-  <img src="Images/Foto_Equipe.png" width="300">
+  <img src="Images/Foto_Equipe.jpeg" width="300">
   <br>
   Team Picture
 </p>
@@ -108,7 +108,7 @@ Watch our robot playing.
 </p>
 
 <p align=center>
-  <a href="LINK_DO_VIDEO_AQUI">▶ Watch the Video</a>
+  <a href="Video_Robô.mp4">▶ Watch the Video</a>
 </p>
 
 <hr>
