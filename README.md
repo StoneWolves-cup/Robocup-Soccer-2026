@@ -12,7 +12,7 @@ Stone Wolves
 
 <h3 align=center>Logo</h3>
 <p align= center>
-<img src="logo_StoneWolves.png" width ="300">
+<img src="Images/logo_StoneWolves.png" width ="300">
 </p>
 <hr>
 
