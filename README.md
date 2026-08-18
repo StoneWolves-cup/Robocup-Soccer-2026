@@ -59,7 +59,6 @@ Ribeirão Preto, São Paulo, Brazil
   <li>Felipe Siqueira</li>
   <li>Luana Bazan</li>
   <li>Luiz Henrique</li>
-  <li>Nicolas Bermudes</li>
   <li>Nicoly Aguiar</li>
   <li>Raul Furlan</li>
   <li>Samuel Brito</li>
