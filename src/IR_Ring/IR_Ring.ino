@@ -5,36 +5,17 @@
 
 
 // ============================================================
-// PINOS DOS 15 TSOP2240
+// PINOS DOS 8 TSSP4038
 //
 // ESP32 DevKit V1
 //
 // Sensor físico:
 //
-// 1  -> GPIO 23
-// 2  -> GPIO 19
-// 3  -> GPIO 18
-// 4  -> GPIO 5
-// 5  -> GPIO 17  (RX2)
+// A ordem abaixo define os ângulos 0°, 45°, ..., 315°.
+// Ajuste a ordem dos GPIOs para coincidir com a montagem mecânica.
 //
-// 6  -> GPIO 16  (TX2)
-// 7  -> GPIO 4
-// 8  -> GPIO 2
-// 9  -> GPIO 25
-// 10 -> GPIO 33
-//
-// 11 -> GPIO 32
-// 12 -> GPIO 34
-// 13 -> GPIO 39 (VN)
-// 14 -> GPIO 36 (VP)
-// 15 -> GPIO 35
-//
-// A posição 16 é VIRTUAL.
-//
-// Ela fica entre o sensor 15 e o sensor 1:
-//                  337,5°
-//
-// Não existe GPIO para o sensor 16.
+// O TSSP4038 possui saída ativa em nível baixo; o processamento
+// conta as bordas FALLING geradas pela portadora de 38 kHz.
 // ============================================================
 
 const uint8_t sensorPins[
@@ -46,18 +27,9 @@ const uint8_t sensorPins[
     18,
     5,
     17,
-
     16,
     4,
-    2,
-    25,
-    33,
-
-    32,
-    34,
-    39,
-    36,
-    35
+    2
 };
 
 
@@ -99,7 +71,7 @@ void setup()
     );
 
     Serial.println(
-        "     15 TSOP2240 + 1 POSICAO VIRTUAL"
+        "     8 TSSP4038 - vetor ponderado"
     );
 
     Serial.println(
@@ -144,7 +116,7 @@ void setup()
 
 
     // --------------------------------------------------------
-    // Filtro exponencial
+    // Filtro exponencial do vetor
     //
     // Quanto maior:
     //     mais estável
@@ -162,7 +134,7 @@ void setup()
     // Limite mínimo para considerar que existe bola.
     // --------------------------------------------------------
 
-    ring.setDetectionThreshold(10);
+    ring.setDetectionThreshold(2);
 
 
     // --------------------------------------------------------
@@ -289,18 +261,8 @@ void loop()
             );
 
 
-            // ------------------------------------------------
-            // Posição virtual 16
-            // ------------------------------------------------
-
-            if(
-                result.virtualSensor16
-            )
-            {
-                Serial.print(
-                    " | VIRTUAL 16"
-                );
-            }
+            Serial.print(" | Sensor max: ");
+            Serial.print(result.strongestSensor);
         }
         else
         {
