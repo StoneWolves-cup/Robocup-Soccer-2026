@@ -2,12 +2,12 @@
 #include <Arduino.h>
 #include <PID.h>
 
-#define PINO_TSSP 19
+#define PINO_TSSP 13
 
 // ===== CONFIGURACAO DO PID =====
 float Kp = 1.0f;
-float Ki = 0.05f;
-float Kd = 0.0f;
+float Ki = 0.1f;
+float Kd = 0.3f;
 
 const float SAIDA_MIN = -100.0f;
 const float SAIDA_MAX = 100.0f;
@@ -30,12 +30,25 @@ float LIMIAR_DESLIGAR = 1.5f;
 const uint8_t CONFIRMA_LIGAR = 3;
 const uint8_t CONFIRMA_DESLIGAR = 5;
 
+// ===== CALIBRACAO DA DISTANCIA =====
+// SUBSTITUA estes valores pelos resultados das suas
+// medicoes com a bola em distancias conhecidas.
+//
+// Valores abaixo sao apenas exemplos.
+const float ATIVIDADE_PERTO = 30.0f;
+const float DISTANCIA_PERTO_CM = 10.0f;
+
+const float ATIVIDADE_LONGE = 3.0f;
+const float DISTANCIA_LONGE_CM = 100.0f;
+
+// ===== VARIAVEIS =====
 float buffer[QUADROS] = {0};
 uint8_t indice = 0;
 uint8_t quantidade = 0;
 
 float atividadeFiltrada = 0.0f;
 float saidaPID = 0.0f;
+float distanciaCm = 0.0f;
 
 bool bolaDetectada = false;
 bool primeiraLeitura = true;
@@ -49,6 +62,7 @@ uint32_t ultimaAtualizacao;
 uint32_t totalAmostras = 0;
 uint32_t amostrasLow = 0;
 
+// ===== MEDIA DA ATIVIDADE =====
 float calcularMedia() {
   float soma = 0.0f;
 
@@ -56,9 +70,44 @@ float calcularMedia() {
     soma += buffer[i];
   }
 
-  return quantidade > 0 ? soma / quantidade : 0.0f;
+  return quantidade > 0
+      ? soma / quantidade
+      : 0.0f;
 }
 
+// ===== ESTIMATIVA DA DISTANCIA =====
+// Interpolacao linear entre dois pontos calibrados.
+// Nao representa uma medida direta de distancia.
+float calcularDistancia(float atividade) {
+  float diferencaAtividade =
+      ATIVIDADE_PERTO - ATIVIDADE_LONGE;
+
+  if (diferencaAtividade <= 0.0f) {
+    return -1.0f;
+  }
+
+  float proporcao =
+      (ATIVIDADE_PERTO - atividade) /
+      diferencaAtividade;
+
+  float distancia =
+      DISTANCIA_PERTO_CM +
+      proporcao *
+      (DISTANCIA_LONGE_CM - DISTANCIA_PERTO_CM);
+
+  // Limita a estimativa a faixa calibrada.
+  if (distancia < DISTANCIA_PERTO_CM) {
+    distancia = DISTANCIA_PERTO_CM;
+  }
+
+  if (distancia > DISTANCIA_LONGE_CM) {
+    distancia = DISTANCIA_LONGE_CM;
+  }
+
+  return distancia;
+}
+
+// ===== CONFIGURACAO =====
 void setup() {
   Serial.begin(115200);
   pinMode(PINO_TSSP, INPUT);
@@ -69,13 +118,16 @@ void setup() {
   ultimaAtualizacao = millis();
 
   Serial.println("TSSP4038 + PID.h iniciado");
+  Serial.println("Atividade | Distancia (cm) | PID | Bola");
 }
 
+// ===== LOOP PRINCIPAL =====
 void loop() {
-  // Leitura continua do sensor, sem delay().
+  // Leitura continua, sem delay().
   if (digitalRead(PINO_TSSP) == LOW) {
     amostrasLow++;
   }
+
   totalAmostras++;
 
   uint32_t agoraUs = micros();
@@ -86,7 +138,8 @@ void loop() {
 
     if (totalAmostras > 0) {
       atividade =
-          100.0f * amostrasLow / totalAmostras;
+          100.0f * (float)amostrasLow /
+          (float)totalAmostras;
     }
 
     if (primeiraLeitura) {
@@ -98,7 +151,7 @@ void loop() {
           (1.0f - ALPHA) * atividadeFiltrada;
     }
 
-    // Armazena atividade filtrada no buffer circular.
+    // Buffer circular.
     buffer[indice] = atividadeFiltrada;
     indice = (indice + 1) % QUADROS;
 
@@ -113,7 +166,7 @@ void loop() {
 
   uint32_t agoraMs = millis();
 
-  // Atualiza o PID em intervalo fixo.
+  // Atualizacao periodica.
   if ((uint32_t)(agoraMs - ultimaAtualizacao)
       >= PERIODO_PID_MS) {
 
@@ -123,9 +176,11 @@ void loop() {
     ultimaAtualizacao = agoraMs;
 
     float atividadeMedia = calcularMedia();
+
+    // O erro continua sendo usado internamente pelo PID,
+    // mas nao e exibido no Monitor Serial.
     float erro = SETPOINT - atividadeMedia;
 
-    // Sem giroscópio: velocidade angular igual a zero.
     saidaPID = pid.calculate(erro, 0.0f, dt);
 
     // Histerese com confirmacao temporal.
@@ -163,11 +218,22 @@ void loop() {
       }
     }
 
+    // Calcula distancia somente quando a bola e detectada.
+    if (bolaDetectada) {
+      distanciaCm = calcularDistancia(atividadeMedia);
+    }
+
+    // ===== MONITOR SERIAL =====
     Serial.print("Atividade: ");
     Serial.print(atividadeMedia, 2);
+    Serial.print("% | Distancia: ");
 
-    Serial.print("% | Erro: ");
-    Serial.print(erro, 2);
+    if (bolaDetectada && distanciaCm >= 0.0f) {
+      Serial.print(distanciaCm, 1);
+      Serial.print(" cm");
+    } else {
+      Serial.print("Indisponivel");
+    }
 
     Serial.print(" | PID: ");
     Serial.print(saidaPID, 2);
