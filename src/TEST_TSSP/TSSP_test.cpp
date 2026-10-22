@@ -1,246 +1,100 @@
 
 #include <Arduino.h>
-#include <PID.h>
+/*const int FRENTE = 13;
+const int TRAS = 19;
+const int ESQUERDA = 25;
+const int DIREITA = 23;*/
 
-#define PINO_TSSP 13
+const uint8_t PINO_TSSP1 = 13;
+const uint8_t PINO_TSSP2 = 19;
 
-// ===== CONFIGURACAO DO PID =====
-float Kp = 1.0f;
-float Ki = 0.1f;
-float Kd = 0.3f;
-
-const float SAIDA_MIN = -100.0f;
-const float SAIDA_MAX = 100.0f;
-const float LIMITE_INTEGRAL = 50.0f;
-
-PID pid(Kp, Ki, Kd, SAIDA_MIN, SAIDA_MAX);
-
-// ===== AMOSTRAGEM =====
 const uint32_t JANELA_US = 5000;
-const uint32_t PERIODO_PID_MS = 20;
+const uint32_t INTERVALO_SERIAL_MS = 100;
 
-const uint8_t QUADROS = 12;
-const float ALPHA = 0.2f;
+uint32_t inicioJanela = 0;
+uint32_t ultimaSerial = 0;
 
-// ===== DETECCAO =====
-float SETPOINT = 30.0f;
-float LIMIAR_LIGAR = 3.0f;
-float LIMIAR_DESLIGAR = 1.5f;
+uint32_t totalLeituras1 = 0;
+uint32_t leiturasLow1 = 0;
 
-const uint8_t CONFIRMA_LIGAR = 3;
-const uint8_t CONFIRMA_DESLIGAR = 5;
+uint32_t totalLeituras2 = 0;
+uint32_t leiturasLow2 = 0;
 
-// ===== CALIBRACAO DA DISTANCIA =====
-// SUBSTITUA estes valores pelos resultados das suas
-// medicoes com a bola em distancias conhecidas.
-//
-// Valores abaixo sao apenas exemplos.
-const float ATIVIDADE_PERTO = 30.0f;
-const float DISTANCIA_PERTO_CM = 10.0f;
+float atividade1 = 0.0f;
+float atividade2 = 0.0f;
 
-const float ATIVIDADE_LONGE = 3.0f;
-const float DISTANCIA_LONGE_CM = 100.0f;
-
-// ===== VARIAVEIS =====
-float buffer[QUADROS] = {0};
-uint8_t indice = 0;
-uint8_t quantidade = 0;
-
-float atividadeFiltrada = 0.0f;
-float saidaPID = 0.0f;
-float distanciaCm = 0.0f;
-
-bool bolaDetectada = false;
-bool primeiraLeitura = true;
-
-uint8_t contadorLigado = 0;
-uint8_t contadorDesligado = 0;
-
-uint32_t inicioJanela;
-uint32_t ultimaAtualizacao;
-
-uint32_t totalAmostras = 0;
-uint32_t amostrasLow = 0;
-
-// ===== MEDIA DA ATIVIDADE =====
-float calcularMedia() {
-  float soma = 0.0f;
-
-  for (uint8_t i = 0; i < quantidade; i++) {
-    soma += buffer[i];
-  }
-
-  return quantidade > 0
-      ? soma / quantidade
-      : 0.0f;
-}
-
-// ===== ESTIMATIVA DA DISTANCIA =====
-// Interpolacao linear entre dois pontos calibrados.
-// Nao representa uma medida direta de distancia.
-float calcularDistancia(float atividade) {
-  float diferencaAtividade =
-      ATIVIDADE_PERTO - ATIVIDADE_LONGE;
-
-  if (diferencaAtividade <= 0.0f) {
-    return -1.0f;
-  }
-
-  float proporcao =
-      (ATIVIDADE_PERTO - atividade) /
-      diferencaAtividade;
-
-  float distancia =
-      DISTANCIA_PERTO_CM +
-      proporcao *
-      (DISTANCIA_LONGE_CM - DISTANCIA_PERTO_CM);
-
-  // Limita a estimativa a faixa calibrada.
-  if (distancia < DISTANCIA_PERTO_CM) {
-    distancia = DISTANCIA_PERTO_CM;
-  }
-
-  if (distancia > DISTANCIA_LONGE_CM) {
-    distancia = DISTANCIA_LONGE_CM;
-  }
-
-  return distancia;
-}
-
-// ===== CONFIGURACAO =====
 void setup() {
   Serial.begin(115200);
-  pinMode(PINO_TSSP, INPUT);
 
-  pid.setIntegralLimit(LIMITE_INTEGRAL);
+  pinMode(PINO_TSSP1, INPUT_PULLUP);
+  pinMode(PINO_TSSP2, INPUT_PULLUP);
 
   inicioJanela = micros();
-  ultimaAtualizacao = millis();
+  ultimaSerial = millis();
 
-  Serial.println("TSSP4038 + PID.h iniciado");
-  Serial.println("Atividade | Distancia (cm) | PID | Bola");
+  Serial.println("Teste de 2 sensores TSSP4038");
+  Serial.println("Aguardando sinal infravermelho...");
 }
 
-// ===== LOOP PRINCIPAL =====
 void loop() {
-  // Leitura continua, sem delay().
-  if (digitalRead(PINO_TSSP) == LOW) {
-    amostrasLow++;
-  }
-
-  totalAmostras++;
-
   uint32_t agoraUs = micros();
+  uint32_t agoraMs = millis();
 
-  // Calcula atividade a cada janela de 5 ms.
   if ((uint32_t)(agoraUs - inicioJanela) >= JANELA_US) {
-    float atividade = 0.0f;
-
-    if (totalAmostras > 0) {
-      atividade =
-          100.0f * (float)amostrasLow /
-          (float)totalAmostras;
+    if (totalLeituras1 > 0) {
+      atividade1 = 100.0f * leiturasLow1 / totalLeituras1;
     }
 
-    if (primeiraLeitura) {
-      atividadeFiltrada = atividade;
-      primeiraLeitura = false;
-    } else {
-      atividadeFiltrada =
-          ALPHA * atividade +
-          (1.0f - ALPHA) * atividadeFiltrada;
+    if (totalLeituras2 > 0) {
+      atividade2 = 100.0f * leiturasLow2 / totalLeituras2;
     }
 
-    // Buffer circular.
-    buffer[indice] = atividadeFiltrada;
-    indice = (indice + 1) % QUADROS;
+    totalLeituras1 = 0;
+    leiturasLow1 = 0;
 
-    if (quantidade < QUADROS) {
-      quantidade++;
-    }
+    totalLeituras2 = 0;
+    leiturasLow2 = 0;
 
-    amostrasLow = 0;
-    totalAmostras = 0;
     inicioJanela = agoraUs;
   }
 
-  uint32_t agoraMs = millis();
+  int estado1 = digitalRead(PINO_TSSP1);
+  int estado2 = digitalRead(PINO_TSSP2);
 
-  // Atualizacao periodica.
-  if ((uint32_t)(agoraMs - ultimaAtualizacao)
-      >= PERIODO_PID_MS) {
+  totalLeituras1++;
+  totalLeituras2++;
 
-    float dt =
-        (agoraMs - ultimaAtualizacao) / 1000.0f;
+  if (estado1 == LOW) {
+    leiturasLow1++;
+  }
 
-    ultimaAtualizacao = agoraMs;
+  if (estado2 == LOW) {
+    leiturasLow2++;
+  }
 
-    float atividadeMedia = calcularMedia();
+  if ((uint32_t)(agoraMs - ultimaSerial) >=
+      INTERVALO_SERIAL_MS) {
 
-    // O erro continua sendo usado internamente pelo PID,
-    // mas nao e exibido no Monitor Serial.
-    float erro = SETPOINT - atividadeMedia;
+    ultimaSerial = agoraMs;
 
-    saidaPID = pid.calculate(erro, 0.0f, dt);
+    Serial.print("Sensor 1  | Atividade LOW: ");
+    Serial.print(atividade1, 1);
+    Serial.print("% | Estado: ");
+    Serial.print(estado1 == LOW ? "LOW" : "HIGH");
+    Serial.print(" | Deteccao: ");
+    Serial.println(atividade1 > 5.0f
+                   ? "SINAL DETECTADO"
+                   : "SEM SINAL");
 
-    // Histerese com confirmacao temporal.
-    if (!bolaDetectada) {
-      contadorDesligado = 0;
+    Serial.print("Sensor 2 ( | Atividade LOW: ");
+    Serial.print(atividade2, 1);
+    Serial.print("% | Estado: ");
+    Serial.print(estado2 == LOW ? "LOW" : "HIGH");
+    Serial.print(" | Deteccao: ");
+    Serial.println(atividade2 > 5.0f
+                   ? "SINAL DETECTADO"
+                   : "SEM SINAL");
 
-      if (atividadeMedia >= LIMIAR_LIGAR) {
-        if (contadorLigado < CONFIRMA_LIGAR) {
-          contadorLigado++;
-        }
-      } else {
-        contadorLigado = 0;
-      }
-
-      if (contadorLigado >= CONFIRMA_LIGAR) {
-        bolaDetectada = true;
-        contadorLigado = 0;
-        pid.reset();
-      }
-    } else {
-      contadorLigado = 0;
-
-      if (atividadeMedia <= LIMIAR_DESLIGAR) {
-        if (contadorDesligado < CONFIRMA_DESLIGAR) {
-          contadorDesligado++;
-        }
-      } else {
-        contadorDesligado = 0;
-      }
-
-      if (contadorDesligado >= CONFIRMA_DESLIGAR) {
-        bolaDetectada = false;
-        contadorDesligado = 0;
-        pid.reset();
-      }
-    }
-
-    // Calcula distancia somente quando a bola e detectada.
-    if (bolaDetectada) {
-      distanciaCm = calcularDistancia(atividadeMedia);
-    }
-
-    // ===== MONITOR SERIAL =====
-    Serial.print("Atividade: ");
-    Serial.print(atividadeMedia, 2);
-    Serial.print("% | Distancia: ");
-
-    if (bolaDetectada && distanciaCm >= 0.0f) {
-      Serial.print(distanciaCm, 1);
-      Serial.print(" cm");
-    } else {
-      Serial.print("Indisponivel");
-    }
-
-    Serial.print(" | PID: ");
-    Serial.print(saidaPID, 2);
-
-    Serial.print(" | Bola: ");
-    Serial.println(
-        bolaDetectada ? "DETECTADA" : "AUSENTE"
-    );
+    Serial.println("------------------------------");
   }
 }
