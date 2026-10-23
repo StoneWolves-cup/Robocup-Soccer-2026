@@ -11,7 +11,7 @@ constexpr uint8_t NUM_SENSORES = 16;
 
 const uint8_t pinos[NUM_SENSORES] = {
   34, 23, 22, 21, 19, 18, 17, 16,
-  4, 12, 13, 27, 26, 25, 33, 32
+  4, 14, 13, 27, 26, 25, 33, 32
 
 
 };
