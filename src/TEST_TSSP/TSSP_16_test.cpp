@@ -11,7 +11,9 @@ constexpr uint8_t NUM_SENSORES = 16;
 
 const uint8_t pinos[NUM_SENSORES] = {
   34, 23, 22, 21, 19, 18, 17, 16,
-  4, 14, 13, 27, 26, 25, 33, 32
+  4, 12, 13, 27, 26, 25, 33, 32
+
+
 };
 
 // Ângulos físicos em graus. Sensor 0 aponta para a frente;
@@ -48,13 +50,6 @@ float direcaoGraus = 0.0f;
 float confianca = 0.0f;
 bool bolaDetectada = false;
 
-// Normaliza um ângulo para [-180, 180)
-float normalizarAngulo(float angulo) {
-  while (angulo >= 180.0f) angulo -= 360.0f;
-  while (angulo < -180.0f) angulo += 360.0f;
-  return angulo;
-}
-
 void calcularDirecao() {
   float x = 0.0f;
   float y = 0.0f;
@@ -62,24 +57,20 @@ void calcularDirecao() {
 
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
     peso[i] = fmaxf(0.0f, atividade[i] - LIMIAR_ATIVIDADE);
-
     const float rad = angulosSensores[i] * DEG_TO_RAD;
     x += peso[i] * cosf(rad);
     y += peso[i] * sinf(rad);
     somaPesos += peso[i];
   }
 
-  // Filtra os componentes do vetor e a soma dos pesos.
   if (!filtroIniciado) {
     vetorXFiltrado = x;
     vetorYFiltrado = y;
     somaPesosFiltrada = somaPesos;
     filtroIniciado = true;
   } else {
-    vetorXFiltrado =
-      ALPHA * x + (1.0f - ALPHA) * vetorXFiltrado;
-    vetorYFiltrado =
-      ALPHA * y + (1.0f - ALPHA) * vetorYFiltrado;
+    vetorXFiltrado = ALPHA * x + (1.0f - ALPHA) * vetorXFiltrado;
+    vetorYFiltrado = ALPHA * y + (1.0f - ALPHA) * vetorYFiltrado;
     somaPesosFiltrada =
       ALPHA * somaPesos + (1.0f - ALPHA) * somaPesosFiltrada;
   }
@@ -91,10 +82,8 @@ void calcularDirecao() {
   }
 
   const float moduloFiltrado = sqrtf(
-    vetorXFiltrado * vetorXFiltrado +
-    vetorYFiltrado * vetorYFiltrado
+    vetorXFiltrado * vetorXFiltrado + vetorYFiltrado * vetorYFiltrado
   );
-
   confianca = moduloFiltrado / somaPesosFiltrada;
 
   if (confianca < CONFIANCA_MIN) {
@@ -103,11 +92,7 @@ void calcularDirecao() {
   }
 
   direcaoGraus = atan2f(vetorYFiltrado, vetorXFiltrado) * RAD_TO_DEG;
-
-  if (direcaoGraus < 0.0f) {
-    direcaoGraus += 360.0f;
-  }
-
+  if (direcaoGraus < 0.0f) direcaoGraus += 360.0f;
   bolaDetectada = true;
 }
 
