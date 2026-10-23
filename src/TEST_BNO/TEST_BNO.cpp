@@ -8,6 +8,7 @@ namespace
 constexpr uint32_t INTERVALO_SENSOR_MS = 10;
 constexpr uint32_t INTERVALO_PID_US = 10000;
 constexpr uint32_t INTERVALO_SERIAL_MS = 100;
+constexpr uint32_t INTERVALO_CALIBRACAO_MS = 1000;
 
 // Ganhos e limites preservados da mecanica antiga do teste.
 BNO055 sensorBNO;
@@ -19,6 +20,8 @@ float pidOutput = 0.0f;
 uint32_t ultimoSensorMs = 0;
 uint32_t ultimoPIDUs = 0;
 uint32_t ultimoPrintMs = 0;
+uint32_t inicioCalibracaoMs = 0;
+bool aguardandoCalibracao = false;
 
 float calcularErroAngular(float desejado, float atual)
 {
@@ -55,19 +58,11 @@ void setup()
         }
     }
 
-    Serial.println("Deixe o robo parado para zerar o heading...");
-    delay(1000);
-
-    // Usa a orientacao atual como zero e reinicia o estado interno do PID.
-    sensorBNO.update();
-    sensorBNO.zero();
-    pidHeading.reset();
-
-    ultimoSensorMs = millis();
-    ultimoPIDUs = micros();
-    ultimoPrintMs = millis();
-
-    Serial.println("Pronto. Heading desejado: 0 graus.");
+    Serial.println("Calibracao magnetica: use a serial para definir a referencia inicial.");
+    Serial.println("Aponte o robo na direcao inicial desejada e envie 'c'.");
+    Serial.println("O heading mostrado sera relativo a essa direcao (0 graus).");
+    inicioCalibracaoMs = millis();
+    aguardandoCalibracao = true;
 }
 
 void loop()
@@ -78,6 +73,38 @@ void loop()
     {
         ultimoSensorMs = agoraMs;
         sensorBNO.update();
+    }
+
+    if (aguardandoCalibracao)
+    {
+        const bool comandoCalibrar = Serial.available() && (Serial.read() == 'c' || Serial.read() == 'C');
+        const bool tempoEsgotado = agoraMs - inicioCalibracaoMs >= INTERVALO_CALIBRACAO_MS;
+        if (comandoCalibrar || tempoEsgotado)
+        {
+            // Fallback automatico mantem o teste utilizavel sem terminal serial.
+            sensorBNO.update();
+            sensorBNO.calibrateNorth();
+            pidHeading.reset();
+            aguardandoCalibracao = false;
+            ultimoSensorMs = agoraMs;
+            ultimoPIDUs = micros();
+            ultimoPrintMs = agoraMs;
+            Serial.println(comandoCalibrar ? "Referencia magnetica definida: 0 graus." : "Referencia definida automaticamente pela direcao atual.");
+            Serial.println("Envie 'c' novamente para recalibrar a referencia.");
+        }
+        return;
+    }
+
+    if (Serial.available())
+    {
+        const char comando = Serial.read();
+        if (comando == 'c' || comando == 'C')
+        {
+            sensorBNO.update();
+            sensorBNO.calibrateNorth();
+            pidHeading.reset();
+            Serial.println("Referencia magnetica recalibrada: heading = 0 graus.");
+        }
     }
 
     const uint32_t agoraUs = micros();
