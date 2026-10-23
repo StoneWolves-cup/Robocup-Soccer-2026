@@ -13,6 +13,7 @@ public:
     bool begin();
     void update();
     void zero();
+    void calibrateNorth();
 
     float getHeading() const;
     float getGyroZ() const;
@@ -24,6 +25,7 @@ private:
     float headingZero;
     float heading;
     float gyroZDegreesPerSecond;
+    float rawHeading;
 };
 
 #endif
