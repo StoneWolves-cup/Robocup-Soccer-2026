@@ -5,7 +5,7 @@ namespace
 {
 // Pinagem usada pelo firmware Ataque_Emissor de referencia. Os GPIOs 5 e 4
 // sao usados pelos drivers de motor em Motores.h, portanto nao podem ser I2C.
-constexpr uint8_t BNO_SDA = 23;
+constexpr uint8_t BNO_SDA = 21;
 constexpr uint8_t BNO_SCL = 22;
 }
 

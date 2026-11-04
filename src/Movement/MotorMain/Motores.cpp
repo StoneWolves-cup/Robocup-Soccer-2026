@@ -1,5 +1,8 @@
 #include <Motores.h>
 
+namespace {
+}
+
 
 // ============================================================
 // CONSTRUTOR
@@ -64,6 +67,7 @@ void Motores::controlarMotor(
         return;
     }
 
+    comando = constrain(comando, -1.0f, 1.0f);
     int velocidade = (int)(fabs(comando) * 255.0f);
 
     if (velocidade > 255)

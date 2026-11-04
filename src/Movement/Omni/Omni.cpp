@@ -45,20 +45,18 @@ ComandosMotores Omni::calcular(
     // CINEMÁTICA
     // ========================================================
 
-    motores.m1 =
-        y + x + rotacao;
-
-
-    motores.m3 =
-        y - x - rotacao;
-
-
-    motores.m4 =
-        y - x + rotacao;
-
-
-    motores.m2 =
-        y + x - rotacao;
+    // Disposicao fisica:
+    //   M1 dianteira esquerda     M2 dianteira direita
+    //   M4 traseira esquerda      M3 traseira direita
+    //
+    // Para rodas mecanum em X, uma translacao lateral usa pares
+    // diagonais. x positivo significa esquerda, como no Body/main.cpp.
+    // y positivo significa frente; rotacao positiva segue a convencao
+    // atual do controlador de rumo.
+    motores.m1 = y - x + rotacao; // dianteira esquerda
+    motores.m2 = y + x - rotacao; // dianteira direita
+    motores.m4 = y + x + rotacao; // traseira esquerda
+    motores.m3 = y - x - rotacao; // traseira direita
 
 
     // ========================================================
