@@ -5,7 +5,7 @@ const int TRAS = 19;
 const int ESQUERDA = 25;
 const int DIREITA = 23;*/
 
-const uint8_t PINO_TSSP1 = 23;
+const uint8_t PINO_TSSP1 = 8;
 const uint8_t PINO_TSSP2 = 14;
 
 const uint32_t JANELA_US = 5000;

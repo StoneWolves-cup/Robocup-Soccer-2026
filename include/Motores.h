@@ -13,14 +13,14 @@ private:
     // ========================================================
 
     // M1
-    static constexpr uint8_t M1_EN  = 33;
-    static constexpr uint8_t M1_IN1 = 25;
-    static constexpr uint8_t M1_IN2 = 26;
+    static constexpr uint8_t M1_EN  = 15;
+    static constexpr uint8_t M1_IN1 = 2;
+    static constexpr uint8_t M1_IN2 = 4;
 
     // M3
-    static constexpr uint8_t M3_EN  = 12;
-    static constexpr uint8_t M3_IN1 = 27;
-    static constexpr uint8_t M3_IN2 = 14;
+    static constexpr uint8_t M3_EN  = 5;
+    static constexpr uint8_t M3_IN1 = 16;
+    static constexpr uint8_t M3_IN2 = 17;
 
 
     // ========================================================
@@ -28,14 +28,14 @@ private:
     // ========================================================
 
     // M4
-    static constexpr uint8_t M4_EN  = 5;
-    static constexpr uint8_t M4_IN1 = 17;
-    static constexpr uint8_t M4_IN2 = 16;
+    static constexpr uint8_t M4_EN  = 13;
+    static constexpr uint8_t M4_IN1 = 12;
+    static constexpr uint8_t M4_IN2 = 14;
 
     // M2
-    static constexpr uint8_t M2_EN  = 15;
-    static constexpr uint8_t M2_IN1 = 4;
-    static constexpr uint8_t M2_IN2 = 2;
+    static constexpr uint8_t M2_EN  = 25;
+    static constexpr uint8_t M2_IN1 = 27;
+    static constexpr uint8_t M2_IN2 = 26;
 
     // Ajuste para inverter individualmente um motor, se necessario.
     static constexpr float INV_M1 = 1.0f;
