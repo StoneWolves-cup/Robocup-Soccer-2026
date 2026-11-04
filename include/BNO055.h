@@ -17,6 +17,8 @@ public:
 
     float getHeading() const;
     float getGyroZ() const;
+    void getCalibration(uint8_t &system, uint8_t &gyro,
+                        uint8_t &accel, uint8_t &mag);
 
 private:
     Adafruit_BNO055 sensor;

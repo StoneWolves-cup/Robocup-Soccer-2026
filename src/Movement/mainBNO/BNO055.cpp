@@ -3,8 +3,10 @@
 
 namespace
 {
-constexpr uint8_t BNO_SDA = 5;
-constexpr uint8_t BNO_SCL = 4;
+// Pinagem usada pelo firmware Ataque_Emissor de referencia. Os GPIOs 5 e 4
+// sao usados pelos drivers de motor em Motores.h, portanto nao podem ser I2C.
+constexpr uint8_t BNO_SDA = 23;
+constexpr uint8_t BNO_SCL = 22;
 }
 
 BNO055::BNO055()
@@ -29,7 +31,6 @@ bool BNO055::begin()
     delay(100);
     sensor.setExtCrystalUse(true);
     update();
-    zero();
     return true;
 }
 
@@ -39,6 +40,9 @@ void BNO055::update()
     sensor.getEvent(&gyroEvent, Adafruit_BNO055::VECTOR_GYROSCOPE);
 
     rawHeading = orientationEvent.orientation.x;
+    // Com headingZero=0 (padrao), mantem o rumo absoluto calculado pelo
+    // NDOF em relacao ao norte magnetico. zero() continua disponivel para
+    // aplicacoes que queiram explicitamente um referencial relativo.
     heading = rawHeading - headingZero;
     while (heading >= 180.0f)
     {
@@ -76,4 +80,10 @@ float BNO055::getHeading() const
 float BNO055::getGyroZ() const
 {
     return gyroZDegreesPerSecond;
+}
+
+void BNO055::getCalibration(uint8_t &system, uint8_t &gyro,
+                            uint8_t &accel, uint8_t &mag)
+{
+    sensor.getCalibration(&system, &gyro, &accel, &mag);
 }
