@@ -1,16 +1,17 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
 #include <TSSP.h>
 #include <IRProtocol.h>
 #include <BNO055.h>
 #include <Ultrassonicos.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <math.h>
 #include <string.h>
 
 namespace {
-constexpr uint8_t CANAL_ESPNOW = 1;
+constexpr int UART_RX_PIN = 7;
+constexpr int UART_TX_PIN = 10;
+constexpr uint32_t UART_BAUD = 115200;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_SERIAL_MS = 100;
 constexpr uint32_t PERIODO_BNO_MS = 10;
@@ -18,7 +19,6 @@ constexpr uint32_t PERIODO_ULTRASSONICOS_MS = 100;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr float ALPHA_DIRECAO = 0.25f;
-const uint8_t BROADCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 const float ANGULOS_GRAUS[IR_SENSOR_COUNT] = {
   0.0f, 22.5f, 45.0f, 67.5f, 90.0f, 112.5f, 135.0f, 157.5f,
   180.0f, 202.5f, 225.0f, 247.5f, 270.0f, 292.5f, 315.0f, 337.5f
@@ -34,6 +34,7 @@ float vetorYFiltrado = 0.0f;
 float somaPesosFiltrada = 0.0f;
 bool filtroIniciado = false;
 bool bnoDisponivel = false;
+SemaphoreHandle_t travaUART = nullptr;
 
 void tarefaLeituraUltrassonicos(void *) {
   float distancias[Ultrassonicos::QUANTIDADE] = {};
@@ -55,11 +56,14 @@ void tarefaLeituraUltrassonicos(void *) {
 
 void imprimirDadosSensores() {
   float x = 0.0f, y = 0.0f, somaPesos = 0.0f;
-  Serial.print("LOW%: ");
+  Serial.print("IR Head LOW% [");
   for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
     const float atividade = sensores.atividadePercentual(i);
+    Serial.print('S');
+    Serial.print(i);
+    Serial.print('=');
     Serial.print(atividade, 1);
-    if (i < IR_SENSOR_COUNT - 1) Serial.print(',');
+    if (i < IR_SENSOR_COUNT - 1) Serial.print(" | ");
 
     const float peso = fmaxf(0.0f, atividade - LIMIAR_ATIVIDADE);
     const float rad = ANGULOS_GRAUS[i] * DEG_TO_RAD;
@@ -94,7 +98,7 @@ void imprimirDadosSensores() {
   }
   const bool bolaDetectada = atividadeValida && confianca >= CONFIANCA_MIN;
 
-  Serial.print(" | Bola: ");
+  Serial.print("] | Bola: ");
   Serial.print(bolaDetectada ? "SIM" : "NAO");
   if (bolaDetectada) {
     Serial.print(" | Direcao: ");
@@ -105,18 +109,11 @@ void imprimirDadosSensores() {
   Serial.println(confianca, 2);
 }
 
-bool iniciarEspNow() {
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  if (esp_wifi_set_channel(CANAL_ESPNOW, WIFI_SECOND_CHAN_NONE) != ESP_OK) return false;
-  if (esp_now_init() != ESP_OK) return false;
-
-  esp_now_peer_info_t peer{};
-  memcpy(peer.peer_addr, BROADCAST_MAC, sizeof(BROADCAST_MAC));
-  peer.channel = CANAL_ESPNOW;
-  peer.encrypt = false;
-  if (esp_now_add_peer(&peer) != ESP_OK) return false;
-  return true;
+void transmitirPacote(const void *pacote, size_t tamanho) {
+  if (xSemaphoreTake(travaUART, portMAX_DELAY) == pdTRUE) {
+    Serial1.write(static_cast<const uint8_t *>(pacote), tamanho);
+    xSemaphoreGive(travaUART);
+  }
 }
 
 void transmitirAtividades() {
@@ -128,9 +125,7 @@ void transmitirAtividades() {
     pacote.activity[i] = sensores.atividadePercentual(i);
   }
   pacote.checksum = irPacketChecksum(pacote);
-  const esp_err_t resultado = esp_now_send(BROADCAST_MAC,
-      reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
-  if (resultado != ESP_OK) Serial.printf("Falha ao enfileirar ESP-NOW: %d\n", resultado);
+  transmitirPacote(&pacote, sizeof(pacote));
 }
 
 void tarefaLeituraIR(void *) {
@@ -172,9 +167,7 @@ void tarefaLeituraBNO(void *) {
     pacote.headingDegrees = bno.getHeading();
     pacote.gyroZDegreesPerSecond = bno.getGyroZ();
     pacote.checksum = bnoPacketChecksum(pacote);
-    const esp_err_t resultado = esp_now_send(BROADCAST_MAC,
-        reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
-    if (resultado != ESP_OK) Serial.printf("Falha ao enfileirar BNO ESP-NOW: %d\n", resultado);
+    transmitirPacote(&pacote, sizeof(pacote));
     vTaskDelay(pdMS_TO_TICKS(PERIODO_BNO_MS));
   }
 }
@@ -182,15 +175,17 @@ void tarefaLeituraBNO(void *) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.println("Monitor IR do Head ativo: 16 sensores, atualizacao a cada 100 ms.");
+  Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  travaUART = xSemaphoreCreateMutex();
+  if (travaUART == nullptr) {
+    Serial.println("ERRO: nao foi possivel criar mutex da UART");
+    while (true) delay(1000);
+  }
   sensores.begin();
   ultrassonicos.begin();
-  if (!iniciarEspNow()) {
-    Serial.println("ERRO: nao foi possivel iniciar ESP-NOW; reiniciando em 2 s");
-    delay(2000);
-    ESP.restart();
-  }
-  Serial.printf("Leitor IR pronto | MAC=%s | canal=%u\n",
-                WiFi.macAddress().c_str(), CANAL_ESPNOW);
+  Serial.printf("UART1 pronta | %lu baud | RX=%d TX=%d\n",
+                static_cast<unsigned long>(UART_BAUD), UART_RX_PIN, UART_TX_PIN);
   xTaskCreatePinnedToCore(tarefaLeituraIR, "LeituraIR", 4096, nullptr, 2, nullptr, 1);
   xTaskCreatePinnedToCore(tarefaLeituraBNO, "LeituraBNO", 4096, nullptr, 2, nullptr, 0);
   xTaskCreatePinnedToCore(tarefaLeituraUltrassonicos, "LeituraUltrassonicos",

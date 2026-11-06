@@ -98,8 +98,12 @@ Our objective is to develop autonomous robots capable of playing soccer through 
 <ul align=center>
   <li>Fusion 360</li>
   <li>Arduino IDE</li>
-  <li>ESP32 (Communication via ESP-NOW)</li>
+  <li>ESP32-S3 (UART entre Head e Body)</li>
 </ul>
+
+<p>UART1 a 115200 baud: ligue TX GPIO10 do Head ao RX GPIO7 do Body e TX
+GPIO10 do Body ao RX GPIO7 do Head, com GND comum. O fluxo de dados atual vai
+do Head ao Body; as leituras IR aparecem no monitor serial do Head.</p>
 
 <hr>
 

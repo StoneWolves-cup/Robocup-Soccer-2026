@@ -9,7 +9,7 @@ constexpr uint8_t IR_PACKET_VERSION = 1;
 constexpr uint8_t BNO_PACKET_VERSION = 1;
 constexpr uint8_t IR_SENSOR_COUNT = 16;
 
-// Payload curto de ESP-NOW: atividade LOW percentual por sensor (0..100).
+// Quadro UART: atividade LOW percentual por sensor (0..100).
 // O processamento angular ocorre somente no ESP32-S3 controlador.
 #pragma pack(push, 1)
 struct IRActivityPacket {

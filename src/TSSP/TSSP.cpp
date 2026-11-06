@@ -3,8 +3,8 @@
 // Mapa copiado do teste TSSP de 16 sensores. Adeque a placa/cabos conforme
 // o pinout real do ESP32-S3 usado no modulo de sensores.
 const uint8_t TSSP::PINOS[TSSP::NUM_SENSORES] = {
-  34, 23, 22, 21, 19, 18, 17, 16,
-  4, 14, 13, 27, 26, 25, 33, 32
+  21, 47, 48, 38, 39, 40, 41,
+  42, 16, 15, 7, 6, 5, 4, 1, 2 
 };
 
 TSSP::TSSP() : totalAmostras_(0), inicioJanela_(0) {

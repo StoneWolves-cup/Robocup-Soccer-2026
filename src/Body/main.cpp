@@ -1,8 +1,4 @@
 #include <Arduino.h>
-#include <WiFi.h>
-#include <esp_now.h>
-#include <esp_wifi.h>
-#include <esp_idf_version.h>
 #include <math.h>
 #include <string.h>
 #include <IRProtocol.h>
@@ -11,10 +7,11 @@
 #include <FuzzyPID.h>
 
 namespace {
-constexpr uint8_t CANAL_ESPNOW = 1;
+constexpr int UART_RX_PIN = 7;
+constexpr int UART_TX_PIN = 10;
+constexpr uint32_t UART_BAUD = 115200;
 constexpr uint32_t TIMEOUT_PACOTE_MS = 250;
 constexpr uint32_t TIMEOUT_BNO_MS = 250;
-constexpr uint32_t INTERVALO_SERIAL_TSSP_MS = 100;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr float ALPHA_DIRECAO = 0.25f;
@@ -65,7 +62,10 @@ bool filtroIniciado = false;
 bool bnoDisponivel = false;
 bool ultimaBolaDetectada = false;
 float ultimaDirecaoBola = 0.0f;
-uint32_t ultimaImpressaoTSSPMs = 0;
+uint8_t bufferUART[sizeof(IRActivityPacket) > sizeof(BNODataPacket)
+                       ? sizeof(IRActivityPacket) : sizeof(BNODataPacket)] = {};
+size_t bytesNoBufferUART = 0;
+size_t tamanhoQuadroUART = 0;
 
 Motores motores;
 Omni omni;
@@ -95,22 +95,45 @@ void receberPacote(const uint8_t *dados, int tamanho) {
   }
 }
 
-#if ESP_IDF_VERSION_MAJOR >= 5
-void callbackRecepcao(const esp_now_recv_info_t *, const uint8_t *dados, int tamanho) {
-  receberPacote(dados, tamanho);
-}
-#else
-void callbackRecepcao(const uint8_t *, const uint8_t *dados, int tamanho) {
-  receberPacote(dados, tamanho);
-}
-#endif
+void processarUART() {
+  while (Serial1.available() > 0) {
+    const uint8_t byteRecebido = static_cast<uint8_t>(Serial1.read());
 
-bool iniciarEspNow() {
-  WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
-  if (esp_wifi_set_channel(CANAL_ESPNOW, WIFI_SECOND_CHAN_NONE) != ESP_OK) return false;
-  if (esp_now_init() != ESP_OK) return false;
-  return esp_now_register_recv_cb(callbackRecepcao) == ESP_OK;
+    if (bytesNoBufferUART == 0) {
+      if (byteRecebido == static_cast<uint8_t>(IR_PACKET_MAGIC) ||
+          byteRecebido == static_cast<uint8_t>(BNO_PACKET_MAGIC)) {
+        bufferUART[0] = byteRecebido;
+        bytesNoBufferUART = 1;
+      }
+      continue;
+    }
+
+    if (bytesNoBufferUART == 1) {
+      bufferUART[1] = byteRecebido;
+      uint16_t magic = 0;
+      memcpy(&magic, bufferUART, sizeof(magic));
+      if (magic == IR_PACKET_MAGIC) {
+        tamanhoQuadroUART = sizeof(IRActivityPacket);
+      } else if (magic == BNO_PACKET_MAGIC) {
+        tamanhoQuadroUART = sizeof(BNODataPacket);
+      } else {
+        bytesNoBufferUART =
+            (byteRecebido == static_cast<uint8_t>(IR_PACKET_MAGIC) ||
+             byteRecebido == static_cast<uint8_t>(BNO_PACKET_MAGIC)) ? 1 : 0;
+        if (bytesNoBufferUART == 1) bufferUART[0] = byteRecebido;
+        continue;
+      }
+      bytesNoBufferUART = 2;
+      continue;
+    }
+
+    bufferUART[bytesNoBufferUART++] = byteRecebido;
+    if (bytesNoBufferUART == tamanhoQuadroUART) {
+      receberPacote(bufferUART, static_cast<int>(tamanhoQuadroUART));
+      bytesNoBufferUART = 0;
+      tamanhoQuadroUART = 0;
+    }
+  }
 }
 
 bool obterQuadro(IRActivityPacket &destino, uint32_t &recebidoEmMs) {
@@ -159,8 +182,6 @@ bool atualizarCorrecaoBNO(const BNODataPacket &pacote, uint32_t recebidoEmMs) {
     fuzzyPidRumo.reset();
     bnoDisponivel = true;
     ultimoRecebimentoBNOMs = recebidoEmMs;
-    Serial.print("BNO remoto OK, heading de referencia: ");
-    Serial.println(rumoDesejadoGraus);
     return true;
   }
 
@@ -255,33 +276,23 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus) {
   aplicarRodas(x, y, correcaoRotacao);
 }
 
-void imprimirLeituraTSSP(const IRActivityPacket &pacote) {
-  Serial.print("TSSP (%): ");
-  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
-    if (i > 0) Serial.print(',');
-    Serial.print(pacote.activity[i]);
-  }
-  Serial.println();
-}
-
 } // namespace
 
 void setup() {
   Serial.begin(115200);
+  Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   delay(200);
-  Serial.println("Inicializando Body...");
+  Serial.printf("Inicializando Body | UART1 %lu baud | RX=%d TX=%d\n",
+                static_cast<unsigned long>(UART_BAUD), UART_RX_PIN, UART_TX_PIN);
 
   motores.begin();
   motores.parar();
 
-  if (!iniciarEspNow()) {
-    Serial.println("ERRO: falha ao inicializar ESP-NOW");
-    while (true) delay(1000);
-  }
-  Serial.println("ESP-NOW OK");
 }
 
 void loop() {
+  processarUART();
+
   BNODataPacket pacoteBNO{};
   uint32_t recebidoBNOEmMs = 0;
   bool rumoAtualizado = false;
@@ -323,10 +334,6 @@ void loop() {
   }
 
   if (quadroNovo) {
-    if ((uint32_t)(agora - ultimaImpressaoTSSPMs) >= INTERVALO_SERIAL_TSSP_MS) {
-      ultimaImpressaoTSSPMs = agora;
-      imprimirLeituraTSSP(ultimoPacote);
-    }
     float confianca = 0.0f;
     ultimaBolaDetectada = estimarDirecao(ultimoPacote, ultimaDirecaoBola,
                                          confianca);
