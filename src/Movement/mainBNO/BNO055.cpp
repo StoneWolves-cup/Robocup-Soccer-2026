@@ -1,14 +1,6 @@
 #include <BNO055.h>
 #include <Wire.h>
 
-namespace
-{
-// Pinagem usada pelo firmware Ataque_Emissor de referencia. Os GPIOs 5 e 4
-// sao usados pelos drivers de motor em Motores.h, portanto nao podem ser I2C.
-constexpr uint8_t BNO_SDA = 21;
-constexpr uint8_t BNO_SCL = 22;
-}
-
 BNO055::BNO055()
     : sensor(55, 0x28),
       headingZero(0.0f),
@@ -18,9 +10,9 @@ BNO055::BNO055()
 {
 }
 
-bool BNO055::begin()
+bool BNO055::begin(uint8_t sda, uint8_t scl)
 {
-    Wire.begin(BNO_SDA, BNO_SCL);
+    Wire.begin(sda, scl);
 
     // NDOF combina acelerometro, giroscopio e magnetometro.
     if (!sensor.begin(OPERATION_MODE_NDOF))

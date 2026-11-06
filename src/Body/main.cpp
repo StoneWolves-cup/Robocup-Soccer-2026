@@ -8,23 +8,25 @@
 #include <IRProtocol.h>
 #include <Omni.h>
 #include <Motores.h>
-#include <BNO055.h>
 #include <FuzzyPID.h>
 
 namespace {
 constexpr uint8_t CANAL_ESPNOW = 1;
 constexpr uint32_t TIMEOUT_PACOTE_MS = 250;
-constexpr uint32_t PERIODO_BNO_US = 10000;
+constexpr uint32_t TIMEOUT_BNO_MS = 250;
+constexpr uint32_t INTERVALO_SERIAL_TSSP_MS = 100;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr float ALPHA_DIRECAO = 0.25f;
 constexpr float VELOCIDADE_SEGUIR = 1.0f;
-// Referencia local capturada na inicializacao; evita exigir alinhamento ao norte.
+// Referencia capturada na primeira leitura remota do BNO.
 float rumoDesejadoGraus = 0.0f;
-constexpr float CORRECAO_MAX_RODAS = 0.10f;
-constexpr float GANHO_P = 0.0015f;
+// A saida do controlador e uma fracao do PWM. Com 0.10, erros comuns
+// produziam menos que a zona morta dos motores (0.02) e nao geravam torque.
+constexpr float CORRECAO_MAX_RODAS = 0.35f;
+constexpr float GANHO_P = 0.67f;
 constexpr float GANHO_I = 0.00002f;
-constexpr float GANHO_D = 0.0016f;
+constexpr float GANHO_D = 0.008f;
 
 // Ordem angular igual ao anel do TSSP.h: 0 frente, positivo para esquerda.
 const float ANGULOS_GRAUS[IR_SENSOR_COUNT] = {
@@ -37,15 +39,23 @@ struct QuadroRecebido {
   uint32_t recebidoEmMs;
   bool disponivel;
 };
+struct QuadroBNORecebido {
+  BNODataPacket pacote;
+  uint32_t recebidoEmMs;
+  bool disponivel;
+};
 
 portMUX_TYPE travaQuadro = portMUX_INITIALIZER_UNLOCKED;
 volatile QuadroRecebido quadroRecebido{};
-uint16_t ultimaSequencia = 0;
-bool sequenciaIniciada = false;
+volatile QuadroBNORecebido quadroBNORecebido{};
+uint16_t ultimaSequenciaIR = 0;
+uint16_t ultimaSequenciaBNO = 0;
+bool sequenciaIRIniciada = false;
+bool sequenciaBNOIniciada = false;
 IRActivityPacket ultimoPacote{};
 uint32_t ultimoRecebimentoMs = 0;
 bool pacoteInicialRecebido = false;
-uint32_t ultimaLeituraBNOUs = 0;
+uint32_t ultimoRecebimentoBNOMs = 0;
 float correcaoRotacao = 0.0f;
 FuzzyPID fuzzyPidRumo(GANHO_P, GANHO_I, GANHO_D, -CORRECAO_MAX_RODAS, CORRECAO_MAX_RODAS);
 float vetorXFiltrado = 0.0f; // lateral: esquerda positiva
@@ -55,23 +65,34 @@ bool filtroIniciado = false;
 bool bnoDisponivel = false;
 bool ultimaBolaDetectada = false;
 float ultimaDirecaoBola = 0.0f;
+uint32_t ultimaImpressaoTSSPMs = 0;
 
 Motores motores;
 Omni omni;
-BNO055 bno;
 
 void receberPacote(const uint8_t *dados, int tamanho) {
-  if (tamanho != (int)sizeof(IRActivityPacket)) return;
-  IRActivityPacket copia;
-  memcpy(&copia, dados, sizeof(copia));
-  if (copia.magic != IR_PACKET_MAGIC || copia.version != IR_PACKET_VERSION ||
-      copia.checksum != irPacketChecksum(copia)) return;
-
-  portENTER_CRITICAL(&travaQuadro);
-  memcpy((void *)&quadroRecebido.pacote, &copia, sizeof(copia));
-  quadroRecebido.recebidoEmMs = millis();
-  quadroRecebido.disponivel = true;
-  portEXIT_CRITICAL(&travaQuadro);
+  if (tamanho < (int)sizeof(uint16_t)) return;
+  uint16_t magic = 0;
+  memcpy(&magic, dados, sizeof(magic));
+  if (magic == IR_PACKET_MAGIC && tamanho == (int)sizeof(IRActivityPacket)) {
+    IRActivityPacket copia;
+    memcpy(&copia, dados, sizeof(copia));
+    if (copia.version != IR_PACKET_VERSION || copia.checksum != irPacketChecksum(copia)) return;
+    portENTER_CRITICAL(&travaQuadro);
+    memcpy((void *)&quadroRecebido.pacote, &copia, sizeof(copia));
+    quadroRecebido.recebidoEmMs = millis();
+    quadroRecebido.disponivel = true;
+    portEXIT_CRITICAL(&travaQuadro);
+  } else if (magic == BNO_PACKET_MAGIC && tamanho == (int)sizeof(BNODataPacket)) {
+    BNODataPacket copia;
+    memcpy(&copia, dados, sizeof(copia));
+    if (copia.version != BNO_PACKET_VERSION || copia.checksum != bnoPacketChecksum(copia)) return;
+    portENTER_CRITICAL(&travaQuadro);
+    memcpy((void *)&quadroBNORecebido.pacote, &copia, sizeof(copia));
+    quadroBNORecebido.recebidoEmMs = millis();
+    quadroBNORecebido.disponivel = true;
+    portEXIT_CRITICAL(&travaQuadro);
+  }
 }
 
 #if ESP_IDF_VERSION_MAJOR >= 5
@@ -105,6 +126,19 @@ bool obterQuadro(IRActivityPacket &destino, uint32_t &recebidoEmMs) {
   return disponivel;
 }
 
+bool obterQuadroBNO(BNODataPacket &destino, uint32_t &recebidoEmMs) {
+  bool disponivel;
+  portENTER_CRITICAL(&travaQuadro);
+  disponivel = quadroBNORecebido.disponivel;
+  if (disponivel) {
+    memcpy(&destino, (const void *)&quadroBNORecebido.pacote, sizeof(destino));
+    recebidoEmMs = quadroBNORecebido.recebidoEmMs;
+    quadroBNORecebido.disponivel = false;
+  }
+  portEXIT_CRITICAL(&travaQuadro);
+  return disponivel;
+}
+
 void aplicarRodas(float x, float y, float correcao) {
   // A rotacao entra junto com a translacao na cinemática das rodas, para
   // corrigir o rumo no mesmo comando que movimenta o robo.
@@ -119,29 +153,56 @@ float erroAngular(float desejado, float atual) {
   return erro;
 }
 
-bool atualizarCorrecaoBNO() {
-  if (!bnoDisponivel) return false;
+bool atualizarCorrecaoBNO(const BNODataPacket &pacote, uint32_t recebidoEmMs) {
+  if (!bnoDisponivel) {
+    rumoDesejadoGraus = pacote.headingDegrees;
+    fuzzyPidRumo.reset();
+    bnoDisponivel = true;
+    ultimoRecebimentoBNOMs = recebidoEmMs;
+    Serial.print("BNO remoto OK, heading de referencia: ");
+    Serial.println(rumoDesejadoGraus);
+    return true;
+  }
 
-  const uint32_t agoraUs = micros();
-  const uint32_t decorridoUs = agoraUs - ultimaLeituraBNOUs;
-  if (decorridoUs < PERIODO_BNO_US) return false;
-
-  bno.update();
-  const float erro = erroAngular(rumoDesejadoGraus, bno.getHeading());
-  const float dt = decorridoUs * 1.0e-6f;
-  // Fuzzy PID controla o rumo usando erro angular circular e giro Z atualizado.
-  correcaoRotacao = fuzzyPidRumo.calculate(erro, bno.getGyroZ(), dt);
-  ultimaLeituraBNOUs = agoraUs;
+  const uint32_t decorridoMs = recebidoEmMs - ultimoRecebimentoBNOMs;
+  if (decorridoMs == 0) return false;
+  const float erro = erroAngular(rumoDesejadoGraus, pacote.headingDegrees);
+  const float dt = decorridoMs * 1.0e-3f;
+  // Fuzzy PID usa o rumo e o giro Z recebidos no pacote independente do BNO.
+  correcaoRotacao = fuzzyPidRumo.calculate(erro, pacote.gyroZDegreesPerSecond, dt);
+  ultimoRecebimentoBNOMs = recebidoEmMs;
   return true;
 }
 
 bool estimarDirecao(const IRActivityPacket &pacote, float &anguloGraus,
                     float &confianca) {
-  float x = 0.0f, y = 0.0f, somaPesos = 0.0f;
+  // Replica a estrategia do codigo de referencia: encontra o sensor mais
+  // ativo, considera apenas sua vizinhanca de sete sensores e pondera a
+  // direcao pelo quadrado da atividade para destacar o pico principal.
+  uint8_t indiceMaximo = 0;
+  uint8_t atividadeMaxima = 0;
   for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
-    const float atividade = pacote.activity[i];
-    const float peso = fmaxf(0.0f, atividade - LIMIAR_ATIVIDADE);
-    const float rad = ANGULOS_GRAUS[i] * DEG_TO_RAD;
+    if (pacote.activity[i] > atividadeMaxima) {
+      atividadeMaxima = pacote.activity[i];
+      indiceMaximo = i;
+    }
+  }
+
+  if (atividadeMaxima <= LIMIAR_ATIVIDADE) {
+    confianca = 0.0f;
+    filtroIniciado = false;
+    return false;
+  }
+
+  float x = 0.0f, y = 0.0f, somaPesos = 0.0f;
+  for (int8_t deslocamento = -3; deslocamento <= 3; ++deslocamento) {
+    const uint8_t indice = (indiceMaximo + IR_SENSOR_COUNT + deslocamento)
+                           % IR_SENSOR_COUNT;
+    const float atividade = pacote.activity[indice];
+    if (atividade < atividadeMaxima * 0.25f) continue;
+
+    const float peso = atividade * atividade;
+    const float rad = ANGULOS_GRAUS[indice] * DEG_TO_RAD;
     // Conversao para eixos de movimento: x lateral, y para frente.
     x += peso * sinf(rad);
     y += peso * cosf(rad);
@@ -150,6 +211,7 @@ bool estimarDirecao(const IRActivityPacket &pacote, float &anguloGraus,
 
   if (somaPesos <= 0.0f) {
     confianca = 0.0f;
+    filtroIniciado = false;
     return false;
   }
 
@@ -169,7 +231,10 @@ bool estimarDirecao(const IRActivityPacket &pacote, float &anguloGraus,
 
   confianca = sqrtf(vetorXFiltrado * vetorXFiltrado + vetorYFiltrado * vetorYFiltrado)
               / somaPesosFiltrada;
-  if (confianca < CONFIANCA_MIN) return false;
+  if (confianca < CONFIANCA_MIN) {
+    filtroIniciado = false;
+    return false;
+  }
 
   anguloGraus = atan2f(vetorXFiltrado, vetorYFiltrado) * RAD_TO_DEG;
   if (anguloGraus < 0.0f) anguloGraus += 360.0f;
@@ -190,6 +255,15 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus) {
   aplicarRodas(x, y, correcaoRotacao);
 }
 
+void imprimirLeituraTSSP(const IRActivityPacket &pacote) {
+  Serial.print("TSSP (%): ");
+  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
+    if (i > 0) Serial.print(',');
+    Serial.print(pacote.activity[i]);
+  }
+  Serial.println();
+}
+
 } // namespace
 
 void setup() {
@@ -200,21 +274,6 @@ void setup() {
   motores.begin();
   motores.parar();
 
-  bnoDisponivel = bno.begin();
-  if (bnoDisponivel) {
-    bno.update();
-    // Usa imediatamente a primeira orientacao lida pelo BNO055 como referencia.
-    // A correcao angular circular mantem esse rumo mesmo enquanto o magnetometro
-    // ainda calibra; nao ha espera de calibracao antes de iniciar o robo.
-    rumoDesejadoGraus = bno.getHeading();
-    fuzzyPidRumo.reset();
-    Serial.print("BNO055 OK, heading inicial: ");
-    Serial.println(rumoDesejadoGraus);
-  } else {
-    Serial.println("ERRO: BNO055 nao encontrado em SDA=21, SCL=22, endereco 0x28");
-  }
-  ultimaLeituraBNOUs = micros();
-
   if (!iniciarEspNow()) {
     Serial.println("ERRO: falha ao inicializar ESP-NOW");
     while (true) delay(1000);
@@ -223,7 +282,17 @@ void setup() {
 }
 
 void loop() {
-  const bool rumoAtualizado = atualizarCorrecaoBNO();
+  BNODataPacket pacoteBNO{};
+  uint32_t recebidoBNOEmMs = 0;
+  bool rumoAtualizado = false;
+  if (obterQuadroBNO(pacoteBNO, recebidoBNOEmMs)) {
+    if (!sequenciaBNOIniciada ||
+        (int16_t)(pacoteBNO.sequence - ultimaSequenciaBNO) > 0) {
+      ultimaSequenciaBNO = pacoteBNO.sequence;
+      sequenciaBNOIniciada = true;
+      rumoAtualizado = atualizarCorrecaoBNO(pacoteBNO, recebidoBNOEmMs);
+    }
+  }
 
   IRActivityPacket pacote{};
   uint32_t recebidoEmMs = 0;
@@ -232,11 +301,11 @@ void loop() {
   bool quadroNovo = chegouPacote;
   if (chegouPacote) {
     // Descarta pacotes repetidos/antigos, inclusive quando chegam fora de ordem.
-    if (sequenciaIniciada && (int16_t)(pacote.sequence - ultimaSequencia) <= 0) {
+    if (sequenciaIRIniciada && (int16_t)(pacote.sequence - ultimaSequenciaIR) <= 0) {
       quadroNovo = false;
     } else {
-      ultimaSequencia = pacote.sequence;
-      sequenciaIniciada = true;
+      ultimaSequenciaIR = pacote.sequence;
+      sequenciaIRIniciada = true;
       ultimoPacote = pacote;
       ultimoRecebimentoMs = recebidoEmMs;
       pacoteInicialRecebido = true;
@@ -249,14 +318,21 @@ void loop() {
     return;
   }
 
+  if (!bnoDisponivel || (uint32_t)(agora - ultimoRecebimentoBNOMs) > TIMEOUT_BNO_MS) {
+    correcaoRotacao = 0.0f;
+  }
+
   if (quadroNovo) {
+    if ((uint32_t)(agora - ultimaImpressaoTSSPMs) >= INTERVALO_SERIAL_TSSP_MS) {
+      ultimaImpressaoTSSPMs = agora;
+      imprimirLeituraTSSP(ultimoPacote);
+    }
     float confianca = 0.0f;
     ultimaBolaDetectada = estimarDirecao(ultimoPacote, ultimaDirecaoBola,
                                          confianca);
   }
 
-  // Atualiza a rotacao pelo BNO entre os pacotes IR tambem, sem interromper
-  // a translacao estimada no ultimo quadro recebido.
+  // Atualiza a rotacao com o pacote BNO sem esperar uma nova leitura IR.
   if (quadroNovo || rumoAtualizado) {
     decidirMovimento(ultimaBolaDetectada, ultimaDirecaoBola);
   }
