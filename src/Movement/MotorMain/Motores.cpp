@@ -19,19 +19,19 @@ Motores::Motores()
 
 void Motores::begin()
 {
-    pinMode(M1_EN, OUTPUT);
+    pinMode(M1_PWM, OUTPUT);
     pinMode(M1_IN1, OUTPUT);
     pinMode(M1_IN2, OUTPUT);
 
-    pinMode(M2_EN, OUTPUT);
+    pinMode(M2_PWM, OUTPUT);
     pinMode(M2_IN1, OUTPUT);
     pinMode(M2_IN2, OUTPUT);
 
-    pinMode(M3_EN, OUTPUT);
+    pinMode(M3_PWM, OUTPUT);
     pinMode(M3_IN1, OUTPUT);
     pinMode(M3_IN2, OUTPUT);
 
-    pinMode(M4_EN, OUTPUT);
+    pinMode(M3_PWM, OUTPUT);
     pinMode(M4_IN1, OUTPUT);
     pinMode(M4_IN2, OUTPUT);
 
@@ -114,7 +114,7 @@ void Motores::definir(
 )
 {
     controlarMotor(
-        M1_EN,
+        M1_PWM,
         M1_IN1,
         M1_IN2,
         m1 * INV_M1
@@ -122,7 +122,7 @@ void Motores::definir(
 
 
     controlarMotor(
-        M2_EN,
+        M2_PWM,
         M2_IN1,
         M2_IN2,
         m2 * INV_M2
@@ -130,7 +130,7 @@ void Motores::definir(
 
 
     controlarMotor(
-        M3_EN,
+        M3_PWM,
         M3_IN1,
         M3_IN2,
         m3 * INV_M3
@@ -138,7 +138,7 @@ void Motores::definir(
 
 
     controlarMotor(
-        M4_EN,
+        M3_PWM,
         M4_IN1,
         M4_IN2,
         m4 * INV_M4
@@ -152,10 +152,10 @@ void Motores::definir(
 
 void Motores::parar()
 {
-    digitalWrite(M1_EN, LOW);
-    digitalWrite(M2_EN, LOW);
-    digitalWrite(M3_EN, LOW);
-    digitalWrite(M4_EN, LOW);
+    digitalWrite(M1_PWM, LOW);
+    digitalWrite(M2_PWM, LOW);
+    digitalWrite(M3_PWM, LOW);
+    digitalWrite(M3_PWM, LOW);
 
     digitalWrite(M1_IN1, LOW);
     digitalWrite(M1_IN2, LOW);

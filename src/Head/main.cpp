@@ -4,12 +4,17 @@
 #include <esp_wifi.h>
 #include <TSSP.h>
 #include <IRProtocol.h>
+#include <BNO055.h>
+#include <Ultrassonicos.h>
 #include <math.h>
+#include <string.h>
 
 namespace {
 constexpr uint8_t CANAL_ESPNOW = 1;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_SERIAL_MS = 100;
+constexpr uint32_t PERIODO_BNO_MS = 10;
+constexpr uint32_t PERIODO_ULTRASSONICOS_MS = 100;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr float ALPHA_DIRECAO = 0.25f;
@@ -20,14 +25,33 @@ const float ANGULOS_GRAUS[IR_SENSOR_COUNT] = {
 };
 
 TSSP sensores;
-IRActivityPacket pacote{};
-uint16_t sequencia = 0;
-uint32_t ultimoEnvio = 0;
-uint32_t ultimaSerial = 0;
+BNO055 bno;
+Ultrassonicos ultrassonicos;
+uint16_t sequenciaIR = 0;
+uint16_t sequenciaBNO = 0;
 float vetorXFiltrado = 0.0f;
 float vetorYFiltrado = 0.0f;
 float somaPesosFiltrada = 0.0f;
 bool filtroIniciado = false;
+bool bnoDisponivel = false;
+
+void tarefaLeituraUltrassonicos(void *) {
+  float distancias[Ultrassonicos::QUANTIDADE] = {};
+  bool validas[Ultrassonicos::QUANTIDADE] = {};
+  for (;;) {
+    ultrassonicos.ler(distancias, validas);
+    Serial.print("Ultrassonicos cm:");
+    for (uint8_t i = 0; i < Ultrassonicos::QUANTIDADE; ++i) {
+      Serial.print(" ECHO");
+      Serial.print(Ultrassonicos::PINOS_ECHO[i]);
+      Serial.print('=');
+      if (validas[i]) Serial.print(distancias[i], 1);
+      else Serial.print("sem leitura");
+    }
+    Serial.println();
+    vTaskDelay(pdMS_TO_TICKS(PERIODO_ULTRASSONICOS_MS));
+  }
+}
 
 void imprimirDadosSensores() {
   float x = 0.0f, y = 0.0f, somaPesos = 0.0f;
@@ -96,9 +120,10 @@ bool iniciarEspNow() {
 }
 
 void transmitirAtividades() {
+  IRActivityPacket pacote{};
   pacote.magic = IR_PACKET_MAGIC;
   pacote.version = IR_PACKET_VERSION;
-  pacote.sequence = sequencia++;
+  pacote.sequence = sequenciaIR++;
   for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
     pacote.activity[i] = sensores.atividadePercentual(i);
   }
@@ -107,11 +132,58 @@ void transmitirAtividades() {
       reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
   if (resultado != ESP_OK) Serial.printf("Falha ao enfileirar ESP-NOW: %d\n", resultado);
 }
+
+void tarefaLeituraIR(void *) {
+  uint32_t ultimoEnvio = millis();
+  uint32_t ultimaSerial = millis();
+  for (;;) {
+    sensores.atualizar();
+    const uint32_t agora = millis();
+    if ((uint32_t)(agora - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
+      ultimoEnvio = agora;
+      transmitirAtividades();
+    }
+    if ((uint32_t)(agora - ultimaSerial) >= INTERVALO_SERIAL_MS) {
+      ultimaSerial = agora;
+      imprimirDadosSensores();
+    }
+    vTaskDelay(1);
+  }
+}
+
+void tarefaLeituraBNO(void *) {
+  BNODataPacket pacote{};
+  for (;;) {
+    if (!bnoDisponivel) {
+      // Pinagem I2C do BNO055 no Head; a pinagem TSSP permanece inalterada.
+      bnoDisponivel = bno.begin(8, 9);
+      if (!bnoDisponivel) {
+        Serial.println("BNO055 indisponivel; nova tentativa em 1 s");
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        continue;
+      }
+      Serial.println("BNO055 OK no Head");
+    }
+
+    bno.update();
+    pacote.magic = BNO_PACKET_MAGIC;
+    pacote.version = BNO_PACKET_VERSION;
+    pacote.sequence = sequenciaBNO++;
+    pacote.headingDegrees = bno.getHeading();
+    pacote.gyroZDegreesPerSecond = bno.getGyroZ();
+    pacote.checksum = bnoPacketChecksum(pacote);
+    const esp_err_t resultado = esp_now_send(BROADCAST_MAC,
+        reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
+    if (resultado != ESP_OK) Serial.printf("Falha ao enfileirar BNO ESP-NOW: %d\n", resultado);
+    vTaskDelay(pdMS_TO_TICKS(PERIODO_BNO_MS));
+  }
+}
 } // namespace
 
 void setup() {
   Serial.begin(115200);
   sensores.begin();
+  ultrassonicos.begin();
   if (!iniciarEspNow()) {
     Serial.println("ERRO: nao foi possivel iniciar ESP-NOW; reiniciando em 2 s");
     delay(2000);
@@ -119,19 +191,12 @@ void setup() {
   }
   Serial.printf("Leitor IR pronto | MAC=%s | canal=%u\n",
                 WiFi.macAddress().c_str(), CANAL_ESPNOW);
-  ultimoEnvio = millis();
+  xTaskCreatePinnedToCore(tarefaLeituraIR, "LeituraIR", 4096, nullptr, 2, nullptr, 1);
+  xTaskCreatePinnedToCore(tarefaLeituraBNO, "LeituraBNO", 4096, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(tarefaLeituraUltrassonicos, "LeituraUltrassonicos",
+                          3072, nullptr, 1, nullptr, 1);
 }
 
 void loop() {
-  // Mantem a aquisicao frequente e envia o quadro mais recente a 50 Hz.
-  sensores.atualizar();
-  const uint32_t agora = millis();
-  if ((uint32_t)(agora - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
-    ultimoEnvio = agora;
-    transmitirAtividades();
-  }
-  if ((uint32_t)(agora - ultimaSerial) >= INTERVALO_SERIAL_MS) {
-    ultimaSerial = agora;
-    imprimirDadosSensores();
-  }
+  vTaskDelay(portMAX_DELAY);
 }

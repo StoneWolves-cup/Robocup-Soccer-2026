@@ -1,128 +1,176 @@
-/*
- * Leitura de 16 LDRs usando um multiplexador CD74HC4067 / 74HC4067.
- *
- * Ligações do multiplexador:
- *   SIG -> MUX_SIG
- *   S0..S3 -> MUX_S0..MUX_S3
- *   C0..C15 -> LDRs da esquerda para a direita
- *   EN -> GND
- *
- * Ajuste MANUALMENTE INITIAL_THRESHOLD apos observar as leituras no Monitor
- * Serial (115200 baud). WHITE_IS_HIGHER depende da ligacao do divisor do LDR.
- */
 #include <Arduino.h>
 
+// Teste para 16 LDRs ligados aos canais C0..C15 de um CD74HC4067.
+// A placa deve manter os LEDs IR ligados durante todas as leituras.
+// Confirme os pinos abaixo com a fiação real antes de energizar.
 constexpr uint8_t SENSOR_COUNT = 16;
+constexpr uint8_t MUX_SIG = 15; // ADC1 no ESP32 DevKit V1 (GPIO4, somente entrada)
+constexpr uint8_t MUX_S0 = 18;
+constexpr uint8_t MUX_S1 = 5;
+constexpr uint8_t MUX_S2 = 4;
+constexpr uint8_t MUX_S3 = 2;
+constexpr uint8_t SAMPLE_COUNT = 12;
+constexpr uint8_t ADC_DISCARD_COUNT = 2;
+constexpr uint16_t CALIBRATION_SAMPLES = 8;
+constexpr uint16_t HYSTERESIS_DIVISOR = 8;
 
-// Ajuste estes pinos conforme a montagem da sua placa.
-constexpr uint8_t MUX_SIG = 34;
-constexpr uint8_t MUX_S0 = 25;
-constexpr uint8_t MUX_S1 = 26;
-constexpr uint8_t MUX_S2 = 27;
-constexpr uint8_t MUX_S3 = 33;
-
-constexpr uint8_t SAMPLE_COUNT = 8;
-// Limiar inicial para ADC de 12 bits (0 a 4095). Ajuste apos observar
-// leituras reais do verde e do branco.
-constexpr uint16_t INITIAL_THRESHOLD = 2048;
-constexpr bool WHITE_IS_HIGHER = true;
+uint16_t whiteReference[SENSOR_COUNT] = {};
+uint16_t greenReference[SENSOR_COUNT] = {};
+uint16_t threshold[SENSOR_COUNT] = {};
+bool whiteCaptured = false;
+bool greenCaptured = false;
+bool sensorIsWhite[SENSOR_COUNT] = {};
 
 void selectMuxChannel(uint8_t channel)
 {
-	digitalWrite(MUX_S0, channel & 0x01);
-	digitalWrite(MUX_S1, (channel >> 1) & 0x01);
-	digitalWrite(MUX_S2, (channel >> 2) & 0x01);
-	digitalWrite(MUX_S3, (channel >> 3) & 0x01);
-	delayMicroseconds(5);
+    digitalWrite(MUX_S0, channel & 0x01);
+    digitalWrite(MUX_S1, (channel >> 1) & 0x01);
+    digitalWrite(MUX_S2, (channel >> 2) & 0x01);
+    digitalWrite(MUX_S3, (channel >> 3) & 0x01);
+    delayMicroseconds(10);
 }
 
-uint16_t readSensor(uint8_t sensor)
+uint16_t readSensor(uint8_t channel)
 {
-	selectMuxChannel(sensor);
+    selectMuxChannel(channel);
+    for (uint8_t i = 0; i < ADC_DISCARD_COUNT; ++i) analogRead(MUX_SIG);
 
-	// A primeira conversão pode ainda refletir o canal anterior.
-	analogRead(MUX_SIG);
-
-	uint32_t total = 0;
-	for (uint8_t sample = 0; sample < SAMPLE_COUNT; ++sample)
-	{
-		total += analogRead(MUX_SIG);
-		delayMicroseconds(80);
-	}
-
-	return total / SAMPLE_COUNT;
+    uint32_t total = 0;
+    for (uint8_t i = 0; i < SAMPLE_COUNT; ++i)
+    {
+        total += analogRead(MUX_SIG);
+        delayMicroseconds(100);
+    }
+    return total / SAMPLE_COUNT;
 }
 
-bool isWhite(uint16_t value)
+uint16_t captureAverage(uint8_t channel)
 {
-	return WHITE_IS_HIGHER ? value >= INITIAL_THRESHOLD
-						   : value <= INITIAL_THRESHOLD;
+    uint32_t total = 0;
+    for (uint8_t i = 0; i < CALIBRATION_SAMPLES; ++i)
+    {
+        total += readSensor(channel);
+        delay(2);
+    }
+    return total / CALIBRATION_SAMPLES;
 }
 
-void printMeasurements()
+void captureReference(uint16_t reference[SENSOR_COUNT])
 {
-	uint16_t values[SENSOR_COUNT] = {};
-	uint16_t activeCount = 0;
-	int32_t weightedPosition = 0;
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
+        reference[i] = captureAverage(i);
+}
 
-	Serial.print("LDR: ");
+void prepareClassification()
+{
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
+    {
+        threshold[i] = (whiteReference[i] + greenReference[i]) / 2;
+        sensorIsWhite[i] = whiteReference[i] >= greenReference[i];
+    }
+}
 
-	for (uint8_t sensor = 0; sensor < SENSOR_COUNT; ++sensor)
-	{
-		values[sensor] = readSensor(sensor);
-		const bool lineDetected = isWhite(values[sensor]);
+bool isWhite(uint8_t sensor, uint16_t value)
+{
+    const bool whiteHigher = whiteReference[sensor] >= greenReference[sensor];
+    const uint16_t difference = abs((int)whiteReference[sensor] - (int)greenReference[sensor]);
+    const uint16_t margin = difference / HYSTERESIS_DIVISOR;
 
-		Serial.print(values[sensor]);
-		Serial.print(lineDetected ? "*" : "-");
+    if (whiteHigher)
+    {
+        if ((uint32_t)value > (uint32_t)threshold[sensor] + margin) sensorIsWhite[sensor] = true;
+        else if ((uint32_t)value + margin < threshold[sensor]) sensorIsWhite[sensor] = false;
+    }
+    else
+    {
+        if ((uint32_t)value + margin < threshold[sensor]) sensorIsWhite[sensor] = true;
+        else if ((uint32_t)value > (uint32_t)threshold[sensor] + margin) sensorIsWhite[sensor] = false;
+    }
+    return sensorIsWhite[sensor];
+}
 
-		if (lineDetected)
-		{
-			++activeCount;
-			weightedPosition += static_cast<int32_t>(sensor) * 1000;
-		}
+void printReadings()
+{
+    uint16_t activeCount = 0;
+    int32_t weightedPosition = 0;
 
-		if (sensor < SENSOR_COUNT - 1)
-		{
-			Serial.print(" | ");
-		}
-	}
+    Serial.print("C0-C15: ");
+    for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
+    {
+        const uint16_t value = readSensor(i);
+        Serial.print(value);
+        if (whiteCaptured && greenCaptured && isWhite(i, value))
+        {
+            Serial.print("*");
+            ++activeCount;
+            weightedPosition += (int32_t)i * 1000;
+        }
+        if (i + 1 < SENSOR_COUNT) Serial.print(" | ");
+    }
 
-	Serial.print(" | ativos: ");
-	Serial.print(activeCount);
-
-	if (activeCount > 0)
-	{
-		// Posição em milésimos do índice: 0 = esquerda, 15000 = direita.
-		Serial.print(" | posicao: ");
-		Serial.println(weightedPosition / activeCount);
-	}
-	else
-	{
-		Serial.println(" | linha nao detectada");
-	}
+    Serial.print(" || linha branca: ");
+    if (!(whiteCaptured && greenCaptured))
+    {
+        Serial.println("calibre com w e g");
+    }
+    else if (activeCount == 0)
+    {
+        Serial.println("nao detectada");
+    }
+    else
+    {
+        Serial.print(activeCount);
+        Serial.print(" sensores | centro (indice x1000): ");
+        Serial.println(weightedPosition / activeCount);
+    }
 }
 
 void setup()
 {
-	Serial.begin(115200);
+    Serial.begin(115200);
+    pinMode(MUX_SIG, INPUT);
+    pinMode(MUX_S0, OUTPUT);
+    pinMode(MUX_S1, OUTPUT);
+    pinMode(MUX_S2, OUTPUT);
+    pinMode(MUX_S3, OUTPUT);
 
-	pinMode(MUX_SIG, INPUT);
-	pinMode(MUX_S0, OUTPUT);
-	pinMode(MUX_S1, OUTPUT);
-	pinMode(MUX_S2, OUTPUT);
-	pinMode(MUX_S3, OUTPUT);
+    analogReadResolution(12);
+    analogSetPinAttenuation(MUX_SIG, ADC_11db);
 
-	analogReadResolution(12);
-	analogSetPinAttenuation(MUX_SIG, ADC_11db);
-
-	Serial.println("LDR 16 canais + CD74HC4067");
-	Serial.print("Limiar fixo: ");
-	Serial.println(INITIAL_THRESHOLD);
-	Serial.println("Ajuste INITIAL_THRESHOLD no codigo para separar verde e branco.");
+    Serial.println("Teste de linha branca - 16 LDRs / CD74HC4067");
+    Serial.println("Comandos: w = calibrar branco | g = calibrar verde | r = reiniciar");
+    Serial.println("Mantenha a placa na mesma altura e com LEDs IR ligados ao calibrar.");
 }
 
 void loop()
 {
-	printMeasurements();
-	delay(100);
+    while (Serial.available())
+    {
+        const char command = Serial.read();
+        if (command == 'w' || command == 'W')
+        {
+            Serial.println("Capturando branco...");
+            captureReference(whiteReference);
+            whiteCaptured = true;
+            if (greenCaptured) prepareClassification();
+            Serial.println("Referencia branca capturada.");
+        }
+        else if (command == 'g' || command == 'G')
+        {
+            Serial.println("Capturando verde...");
+            captureReference(greenReference);
+            greenCaptured = true;
+            if (whiteCaptured) prepareClassification();
+            Serial.println("Referencia verde capturada.");
+        }
+        else if (command == 'r' || command == 'R')
+        {
+            whiteCaptured = false;
+            greenCaptured = false;
+            Serial.println("Calibracao reiniciada.");
+        }
+    }
+
+    printReadings();
+    delay(150);
 }

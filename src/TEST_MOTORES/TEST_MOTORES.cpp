@@ -1,19 +1,19 @@
 #include <Arduino.h>
 
 // Pinos dos quatro motores nos dois drivers L298N.
-constexpr uint8_t M1_EN = 15;
+constexpr uint8_t M1_PWM = 15;
 constexpr uint8_t M1_IN1 = 2;
 constexpr uint8_t M1_IN2 = 4;
 
-constexpr uint8_t M3_EN = 5;
+constexpr uint8_t M3_PWM = 5;
 constexpr uint8_t M3_IN1 = 16;
 constexpr uint8_t M3_IN2 = 17;
 
-constexpr uint8_t M4_EN = 13;
+constexpr uint8_t M3_PWM = 13;
 constexpr uint8_t M4_IN1 = 12;
 constexpr uint8_t M4_IN2 = 14;
 
-constexpr uint8_t M2_EN = 25;
+constexpr uint8_t M2_PWM = 25;
 constexpr uint8_t M2_IN1 = 27;
 constexpr uint8_t M2_IN2 = 26;
 
@@ -49,18 +49,18 @@ void definirSentido(bool frente)
 void habilitarMotores(bool habilitado)
 {
     const uint8_t nivel = habilitado ? POTENCIA_MAXIMA : LOW;
-    digitalWrite(M1_EN, nivel);
-    digitalWrite(M2_EN, nivel);
-    digitalWrite(M3_EN, nivel);
-    digitalWrite(M4_EN, nivel);
+    digitalWrite(M1_PWM, nivel);
+    digitalWrite(M2_PWM, nivel);
+    digitalWrite(M3_PWM, nivel);
+    digitalWrite(M3_PWM, nivel);
 }
 
 void setup()
 {
-    configurarMotor(M1_EN, M1_IN1, M1_IN2);
-    configurarMotor(M2_EN, M2_IN1, M2_IN2);
-    configurarMotor(M3_EN, M3_IN1, M3_IN2);
-    configurarMotor(M4_EN, M4_IN1, M4_IN2);
+    configurarMotor(M1_PWM, M1_IN1, M1_IN2);
+    configurarMotor(M2_PWM, M2_IN1, M2_IN2);
+    configurarMotor(M3_PWM, M3_IN1, M3_IN2);
+    configurarMotor(M3_PWM, M4_IN1, M4_IN2);
 }
 
 void loop()
