@@ -31,7 +31,7 @@ void Motores::begin()
     pinMode(M3_IN1, OUTPUT);
     pinMode(M3_IN2, OUTPUT);
 
-    pinMode(M3_PWM, OUTPUT);
+    pinMode(M4_PWM, OUTPUT);
     pinMode(M4_IN1, OUTPUT);
     pinMode(M4_IN2, OUTPUT);
 
@@ -138,7 +138,7 @@ void Motores::definir(
 
 
     controlarMotor(
-        M3_PWM,
+        M4_PWM,
         M4_IN1,
         M4_IN2,
         m4 * INV_M4
@@ -155,7 +155,7 @@ void Motores::parar()
     digitalWrite(M1_PWM, LOW);
     digitalWrite(M2_PWM, LOW);
     digitalWrite(M3_PWM, LOW);
-    digitalWrite(M3_PWM, LOW);
+    digitalWrite(M4_PWM, LOW);
 
     digitalWrite(M1_IN1, LOW);
     digitalWrite(M1_IN2, LOW);

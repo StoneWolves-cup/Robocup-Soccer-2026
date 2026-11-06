@@ -9,7 +9,7 @@ constexpr uint8_t M3_PWM = 5;
 constexpr uint8_t M3_IN1 = 16;
 constexpr uint8_t M3_IN2 = 17;
 
-constexpr uint8_t M3_PWM = 13;
+constexpr uint8_t M4_PWM = 13;
 constexpr uint8_t M4_IN1 = 12;
 constexpr uint8_t M4_IN2 = 14;
 
@@ -52,7 +52,7 @@ void habilitarMotores(bool habilitado)
     digitalWrite(M1_PWM, nivel);
     digitalWrite(M2_PWM, nivel);
     digitalWrite(M3_PWM, nivel);
-    digitalWrite(M3_PWM, nivel);
+    digitalWrite(M4_PWM, nivel);
 }
 
 void setup()
@@ -60,7 +60,7 @@ void setup()
     configurarMotor(M1_PWM, M1_IN1, M1_IN2);
     configurarMotor(M2_PWM, M2_IN1, M2_IN2);
     configurarMotor(M3_PWM, M3_IN1, M3_IN2);
-    configurarMotor(M3_PWM, M4_IN1, M4_IN2);
+    configurarMotor(M4_PWM, M4_IN1, M4_IN2);
 }
 
 void loop()

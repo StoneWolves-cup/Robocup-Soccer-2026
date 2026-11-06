@@ -64,7 +64,7 @@ void loop() {
             battery.getConsumedMah());
 
         // Ponto de extensão: aqui você pode enviar battery.getPercentCombined()
-        // via ESP-NOW para a ESP32 dos motores, do mesmo jeito que já faz
+        // via UART para a ESP32 dos motores, do mesmo jeito que já faz
         // com os dados do anel de sensores IR, para exibir o nível de
         // bateria em outro lugar (LED, display, telemetria etc).
     }

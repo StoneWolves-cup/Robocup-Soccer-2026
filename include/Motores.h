@@ -28,7 +28,7 @@ private:
     // ========================================================
 
     // M4
-    static constexpr uint8_t M3_PWM  = 15;
+    static constexpr uint8_t M4_PWM = 15;
     static constexpr uint8_t M4_IN1 = 2;
     static constexpr uint8_t M4_IN2 = 4;
 
