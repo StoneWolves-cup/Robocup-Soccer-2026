@@ -104,7 +104,14 @@ Our objective is to develop autonomous robots capable of playing soccer through 
 <p>O Head envia os dados dos 16 sensores TSSP ao Body pela UART1 a 115200 baud,
 8N1. Ligue TX GPIO17 do Head a RX GPIO18 do Body e una os GNDs. O Body acende
 o RGB em vermelho enquanto aguarda dados validos e em verde quando a UART esta
-ativa. As leituras e a direcao da bola aparecem no monitor serial do Head.</p>
+ativa. Conecte o BNO055 ao Head em SDA GPIO8 e SCL GPIO9. O Head envia rumo e
+velocidade angular junto com os dados da bola; o Body segue a direcao detectada
+e corrige a rotacao para manter o rumo inicial. Sem dados recentes do BNO055,
+os motores permanecem parados. As leituras e a direcao da bola aparecem no
+monitor serial do Head; rumo e correcao aparecem no monitor do Body.</p>
+<p>O Body usa PID de rumo (Kp=0.0015, Ki=0.0001, Kd=0.0020), com integral
+limitada para evitar windup. Esses ganhos devem ser ajustados com testes
+controlados no robo.</p>
 
 <hr>
 

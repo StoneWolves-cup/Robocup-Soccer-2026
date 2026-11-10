@@ -3,7 +3,15 @@
 #define RX_PIN 18
 #define TX_PIN 17
 
+namespace {
+constexpr uint32_t UART_TIMEOUT_MS = 2500;
+uint32_t ultimoRecebimentoMs = 0;
+bool comunicacaoAtiva = false;
+}
+
 void setup() {
+  neopixelWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
+
   Serial.begin(115200);
 
   // Inicializa UART1
@@ -18,5 +26,17 @@ void loop() {
 
     Serial.print("Recebido: ");
     Serial.println(mensagem);
+
+    ultimoRecebimentoMs = millis();
+    if (!comunicacaoAtiva) {
+      neopixelWrite(RGB_BUILTIN, 0, RGB_BRIGHTNESS, 0);
+      comunicacaoAtiva = true;
+    }
+  }
+
+  if (comunicacaoAtiva &&
+      (uint32_t)(millis() - ultimoRecebimentoMs) > UART_TIMEOUT_MS) {
+    neopixelWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
+    comunicacaoAtiva = false;
   }
 }

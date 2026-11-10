@@ -4,6 +4,7 @@
 #include <IRProtocol.h>
 #include <Omni.h>
 #include <Motores.h>
+#include <PID.h>
 #include <freertos/FreeRTOS.h>
 
 void IHM_begin();
@@ -21,14 +22,14 @@ constexpr uint32_t TIMEOUT_PACOTE_MS = 250;
 constexpr int UART_RX_PIN = 18;
 constexpr int UART_TX_PIN = 17;
 constexpr uint32_t TIMEOUT_BNO_MS = 250;
-constexpr uint32_t TEMPO_INICIAL_DIAGNOSTICO_MS = 1000;
-constexpr uint32_t INTERVALO_LOG_FALHA_MS = 1000;
 constexpr float POTENCIA_MAXIMA_MOTORES = 0.70f;
 constexpr float VELOCIDADE_SEGUIR = 1.0f;
-constexpr float KP_CORRECAO_RUMO = 0.0015f;
-constexpr float KD_CORRECAO_RUMO = 0.0020f;
+constexpr float KP_CORRECAO_RUMO = 0.469f;
+constexpr float KI_CORRECAO_RUMO = 0.00002f;
+constexpr float KD_CORRECAO_RUMO = 0.0056f;
 constexpr float ZONA_MORTA_RUMO_GRAUS = 2.0f;
 constexpr float ROTACAO_MAXIMA_CORRECAO = 0.30f;
+constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
 
 struct QuadroRecebido {
   IRActivityPacket pacote;
@@ -47,7 +48,6 @@ struct QuadroUltraRecebido {
 };
 
 portMUX_TYPE travaQuadro = portMUX_INITIALIZER_UNLOCKED;
-portMUX_TYPE travaContadoresRX = portMUX_INITIALIZER_UNLOCKED;
 volatile QuadroRecebido quadroRecebido{};
 volatile QuadroBNORecebido quadroBNORecebido{};
 volatile QuadroUltraRecebido quadroUltraRecebido{};
@@ -69,24 +69,10 @@ bool pacoteUltraInicialRecebido = false;
 bool pacoteBNOInicialRecebido = false;
 bool referenciaRumoDefinida = false;
 float rumoDesejadoGraus = 0.0f;
+uint32_t ultimoCalculoPIDUs = 0;
 uint32_t ultimoPacoteUARTMs = 0;
 bool pacoteUARTRecebido = false;
 bool ledUARTVerde = false;
-uint32_t inicioDiagnosticoUARTMs = 0;
-uint32_t ultimaFalhaUARTMs = 0;
-uint32_t ultimoRelatorioPacotesMs = 0;
-uint32_t bytesUARTRecebidos = 0;
-uint32_t pacotesIRRecebidos = 0;
-uint32_t pacotesBNORecebidos = 0;
-uint32_t pacotesUltraRecebidos = 0;
-struct EstadoDiagnostico {
-  bool reportado = false;
-  bool funcionando = false;
-};
-EstadoDiagnostico estadoLinkUART;
-EstadoDiagnostico estadoIRUART;
-EstadoDiagnostico estadoBNOUART;
-EstadoDiagnostico estadoUltraUART;
 bool ultimaBolaDetectada = false;
 float ultimaDirecaoBola = 0.0f;
 constexpr size_t TAMANHO_MAXIMO_PACOTE =
@@ -100,54 +86,9 @@ size_t bytesNoBufferUART = 0;
 
 Motores motores;
 Omni omni;
-
-void registrarFalhaUART(const char *motivo) {
-  const uint32_t agora = millis();
-  if (ultimaFalhaUARTMs != 0 &&
-      (uint32_t)(agora - ultimaFalhaUARTMs) < INTERVALO_LOG_FALHA_MS) return;
-  ultimaFalhaUARTMs = agora;
-  Serial.printf("UART RX: %s\n", motivo);
-}
-
-void informarEstadoCanal(const char *nome, bool jaRecebeu,
-                         uint32_t ultimoRecebimentoMs, uint32_t timeoutMs,
-                         EstadoDiagnostico &estado, uint32_t agora) {
-  const bool funcionando = jaRecebeu &&
-      (uint32_t)(agora - ultimoRecebimentoMs) <= timeoutMs;
-  const bool prazoInicialExpirou =
-      (uint32_t)(agora - inicioDiagnosticoUARTMs) >= TEMPO_INICIAL_DIAGNOSTICO_MS;
-  if (!funcionando && !jaRecebeu && !prazoInicialExpirou) return;
-  if (estado.reportado && estado.funcionando == funcionando) return;
-
-  estado.reportado = true;
-  estado.funcionando = funcionando;
-  Serial.printf("Canal %s UART: %s\n", nome,
-                funcionando ? "OK" : "sem dados recentes");
-}
-
-void atualizarDiagnosticoUART(uint32_t agora) {
-  const bool linkAtivo = pacoteUARTRecebido &&
-      (uint32_t)(agora - ultimoPacoteUARTMs) <= TIMEOUT_PACOTE_MS;
-  const bool prazoInicialExpirou =
-      (uint32_t)(agora - inicioDiagnosticoUARTMs) >= TIMEOUT_PACOTE_MS;
-  if (linkAtivo || prazoInicialExpirou) {
-    if (!estadoLinkUART.reportado || estadoLinkUART.funcionando != linkAtivo) {
-      estadoLinkUART.reportado = true;
-      estadoLinkUART.funcionando = linkAtivo;
-      Serial.printf("Link UART: %s\n", linkAtivo ? "OK" : "sem dados recentes");
-    }
-  }
-
-  informarEstadoCanal("IR", pacoteInicialRecebido, ultimoRecebimentoMs,
-                      TIMEOUT_PACOTE_MS, estadoIRUART, agora);
-  informarEstadoCanal("BNO055", pacoteBNOInicialRecebido,
-                      ultimoRecebimentoBNOMs, TIMEOUT_BNO_MS,
-                      estadoBNOUART, agora);
-  informarEstadoCanal("ultrassonico", pacoteUltraInicialRecebido,
-                      ultimoRecebimentoUltraMs, TIMEOUT_PACOTE_MS,
-                      estadoUltraUART, agora);
-
-}
+PID pidCorrecaoRumo(KP_CORRECAO_RUMO, KI_CORRECAO_RUMO,
+                    KD_CORRECAO_RUMO, -ROTACAO_MAXIMA_CORRECAO,
+                    ROTACAO_MAXIMA_CORRECAO);
 
 void atualizarLedUART() {
   const bool comunicacaoConfirmada = pacoteUARTRecebido &&
@@ -167,39 +108,10 @@ void confirmarPacoteUART() {
   atualizarLedUART();
 }
 
-void registrarPacoteRecebido(uint16_t magic) {
-  portENTER_CRITICAL(&travaContadoresRX);
-  if (magic == IR_PACKET_MAGIC) {
-    ++pacotesIRRecebidos;
-  } else if (magic == BNO_PACKET_MAGIC) {
-    ++pacotesBNORecebidos;
-  } else if (magic == ULTRA_PACKET_MAGIC) {
-    ++pacotesUltraRecebidos;
-  }
-  portEXIT_CRITICAL(&travaContadoresRX);
-}
-
-void relatarPacotesRecebidos(uint32_t agora) {
-  if ((uint32_t)(agora - ultimoRelatorioPacotesMs) < 1000) return;
-  ultimoRelatorioPacotesMs = agora;
-
-  uint32_t ir, bno, ultra;
-  portENTER_CRITICAL(&travaContadoresRX);
-  ir = pacotesIRRecebidos;
-  bno = pacotesBNORecebidos;
-  ultra = pacotesUltraRecebidos;
-  pacotesIRRecebidos = 0;
-  pacotesBNORecebidos = 0;
-  pacotesUltraRecebidos = 0;
-  portEXIT_CRITICAL(&travaContadoresRX);
-
-  const uint32_t bytes = bytesUARTRecebidos;
-  bytesUARTRecebidos = 0;
-  Serial.printf("UART RX/s: bytes=%lu IR=%lu BNO=%lu ultra=%lu\n",
-                static_cast<unsigned long>(bytes),
-                static_cast<unsigned long>(ir),
-                static_cast<unsigned long>(bno),
-                static_cast<unsigned long>(ultra));
+void registrarFalhaUART(const char *motivo) {
+  (void)motivo;
+  pacoteUARTRecebido = false;
+  atualizarLedUART();
 }
 
 bool receberPacote(const uint8_t *dados, int tamanho) {
@@ -231,7 +143,6 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("resultado TSSP invalido no quadro IR");
       return false;
     }
-    registrarPacoteRecebido(IR_PACKET_MAGIC);
     confirmarPacoteUART();
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroRecebido.pacote, &copia, sizeof(copia));
@@ -256,7 +167,6 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("checksum invalido no quadro BNO055");
       return false;
     }
-    registrarPacoteRecebido(BNO_PACKET_MAGIC);
     confirmarPacoteUART();
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroBNORecebido.pacote, &copia, sizeof(copia));
@@ -281,7 +191,6 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("checksum invalido no quadro ultrassonico");
       return false;
     }
-    registrarPacoteRecebido(ULTRA_PACKET_MAGIC);
     confirmarPacoteUART();
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroUltraRecebido.pacote, &copia, sizeof(copia));
@@ -307,7 +216,6 @@ void processarUART() {
       memmove(bufferUART, bufferUART + 1, --bytesNoBufferUART);
     }
     const uint8_t byteRecebido = static_cast<uint8_t>(Serial1.read());
-    ++bytesUARTRecebidos;
     bufferUART[bytesNoBufferUART++] = byteRecebido;
 
     while (bytesNoBufferUART > 0) {
@@ -386,12 +294,21 @@ float erroAngular(float desejado, float atual) {
   return erro;
 }
 
-float calcularCorrecaoRumo(float heading, float gyroZ) {
+float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ) {
+  const uint32_t agoraUs = micros();
+  const uint32_t decorridoUs = agoraUs - ultimoCalculoPIDUs;
+  ultimoCalculoPIDUs = agoraUs;
+
+  if (!bolaDetectada) {
+    pidCorrecaoRumo.reset();
+    return 0.0f;
+  }
+
   float erro = erroAngular(rumoDesejadoGraus, heading);
   if (fabsf(erro) <= ZONA_MORTA_RUMO_GRAUS) erro = 0.0f;
 
-  return constrain(KP_CORRECAO_RUMO * erro - KD_CORRECAO_RUMO * gyroZ,
-                   -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO);
+  const float dt = constrain(decorridoUs / 1000000.0f, 0.001f, 0.1f);
+  return pidCorrecaoRumo.calculate(erro, gyroZ, dt);
 }
 
 void aplicarRodas(float x, float y, float rotacao) {
@@ -403,15 +320,14 @@ void aplicarRodas(float x, float y, float rotacao) {
 }
 
 void imprimirDadosIR(const IRActivityPacket &pacote) {
-  Serial.print("IR LOW%:");
-  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
-    Serial.printf(" %u", pacote.activity[i]);
-    if (i + 1 < IR_SENSOR_COUNT) Serial.print(',');
+  if (pacote.ballDetected) {
+    Serial.printf("Direcao da bola: %.1f graus | Angulo BNO: %.1f graus\n",
+                  pacote.directionTenthsDegrees / 10.0f,
+                  ultimoPacoteBNO.headingDegrees);
+  } else {
+    Serial.printf("Direcao da bola: nao detectada | Angulo BNO: %.1f graus\n",
+                  ultimoPacoteBNO.headingDegrees);
   }
-  const float angulo = pacote.directionTenthsDegrees / 10.0f;
-  const float confianca = pacote.confidencePercent / 100.0f;
-  Serial.printf(" | bola=%s | direcao=%.1f | confianca=%.2f\n",
-                pacote.ballDetected ? "SIM" : "NAO", angulo, confianca);
 }
 
 void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao) {
@@ -430,21 +346,17 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao) {
 void setup() {
   neopixelWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
   Serial.begin(115200);
-  inicioDiagnosticoUARTMs = millis();
-  ultimoRelatorioPacotesMs = inicioDiagnosticoUARTMs;
+  pidCorrecaoRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
+  ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
   IHM_begin();
 
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
-  Serial.printf("Body iniciado: UART1 %lu baud, 8N1, RX=%d TX=%d\n",
-                static_cast<unsigned long>(UART_BAUD), UART_RX_PIN,
-                UART_TX_PIN);
 }
 
 void loop() {
   processarUART();
-  relatarPacotesRecebidos(millis());
   atualizarLedUART();
   IHM_update();
 
@@ -465,8 +377,6 @@ void loop() {
         if (!referenciaRumoDefinida) {
           rumoDesejadoGraus = pacoteBNO.headingDegrees;
           referenciaRumoDefinida = true;
-          Serial.printf("Referencia de rumo definida: %.2f graus\n",
-                        rumoDesejadoGraus);
         }
         pacoteBNOInicialRecebido = true;
         ultimoRecebimentoBNOMs = recebidoBNOEmMs;
@@ -518,7 +428,6 @@ void loop() {
       bnoTelemetriaValida, ultimoPacoteUltra.distanceCm,
       ultimoPacoteUltra.validMask, ultraTelemetriaValida,
       ultimaAtividadeIR, irTelemetriaValida);
-  atualizarDiagnosticoUART(agora);
 
   if (!pacoteInicialRecebido ||
       (uint32_t)(agora - ultimoRecebimentoMs) > TIMEOUT_PACOTE_MS ||
@@ -534,12 +443,10 @@ void loop() {
 
   if (quadroNovo) {
     const float correcaoRumo = calcularCorrecaoRumo(
+        ultimaBolaDetectada,
         ultimoPacoteBNO.headingDegrees,
         ultimoPacoteBNO.gyroZDegreesPerSecond);
     decidirMovimento(ultimaBolaDetectada, ultimaDirecaoBola, correcaoRumo);
-    Serial.printf("Rumo=%.2f alvo=%.2f gyroZ=%.2f correcao=%.3f\n",
-                  ultimoPacoteBNO.headingDegrees, rumoDesejadoGraus,
-                  ultimoPacoteBNO.gyroZDegreesPerSecond, correcaoRumo);
   }
 
 }
