@@ -8,7 +8,7 @@
 // ======================================================================
 
 // Pino ADC do ESP32 ligado ao ponto médio do divisor de tensão
-#define PIN_VBAT_ADC        34
+#define PIN_VBAT_ADC        4
 
 // Se houver sensor de corrente (ex: ACS712 / INA219 via leitura analógica
 // simples), defina HAS_CURRENT_SENSOR. Caso contrário, o estimador roda

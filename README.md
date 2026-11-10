@@ -113,6 +113,16 @@ monitor serial do Head; rumo e correcao aparecem no monitor do Body.</p>
 limitada para evitar windup. Esses ganhos devem ser ajustados com testes
 controlados no robo.</p>
 
+<h3>Teste de leitura percentual da bateria</h3>
+<p>O teste para ESP32-S3 usa o estimador em <code>include/BatteryEstimator.h</code>
+e exibe a tensão e o percentual calculado no monitor serial. Conecte o ponto
+médio do divisor resistivo ao GPIO4 e o GND da bateria ao GND do ESP32.
+Antes de ligar, confira os resistores e a tensão no ADC; ajuste
+<code>DIVIDER_R1_OHM</code>, <code>DIVIDER_R2_OHM</code> e a curva de tensão
+para a bateria utilizada.</p>
+<pre><code>pio run -e bateria-test -t upload
+pio device monitor -e bateria-test</code></pre>
+
 <hr>
 
 <h2 align=center>Robot Video</h2>
