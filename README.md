@@ -123,6 +123,22 @@ para a bateria utilizada.</p>
 <pre><code>pio run -e bateria-test -t upload
 pio device monitor -e bateria-test</code></pre>
 
+<h3>Teste do angulo da bola via UART</h3>
+<p>O emissor lê os 16 sensores TSSP, calcula a direção da bola e envia o pacote
+IR pela UART1. O receptor é um firmware separado que apenas imprime os dados
+IR recebidos no monitor serial, sem depender do Body. Conecte TX GPIO17 do
+emissor ao RX GPIO18 do receptor e una os GNDs. Grave
+<code>uart-ir-emissor-test</code> no emissor e
+<code>uart-ir-receptor-test</code> no receptor. O monitor serial do receptor
+mostra as atividades dos 16 sensores, a direção e a confiança da detecção a
+115200 baud.
+Use no emissor os mesmos GPIOs e conexões da coroa TSSP de 16 sensores. O
+receptor avisa no serial se nenhum byte chegar ou se os bytes não formarem um
+pacote IR válido, e informa quando a comunicação voltar.</p>
+<pre><code>pio run -e uart-ir-emissor-test -t upload
+pio run -e uart-ir-receptor-test -t upload
+pio device monitor -e uart-ir-receptor-test</code></pre>
+
 <hr>
 
 <h2 align=center>Robot Video</h2>
