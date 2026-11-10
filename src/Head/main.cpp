@@ -9,6 +9,7 @@ constexpr uint32_t JANELA_US = 5000;
 constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
+constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 1000;
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
@@ -47,6 +48,7 @@ bool bolaDetectada = false;
 BNO055 sensorBNO;
 bool bnoDisponivel = false;
 uint32_t ultimaAtualizacaoBNO = 0;
+uint32_t ultimaTentativaBNO = 0;
 
 // Copiada do TEST_TSSP/TSSP_16_test.cpp para manter o mesmo calculo vetorial.
 void calcularDirecao() {
@@ -138,6 +140,21 @@ void transmitirBNO() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
+void iniciarBNO() {
+  Serial.println("Tentando inicializar BNO055...");
+  bnoDisponivel = sensorBNO.begin(BNO_SDA_PIN, BNO_SCL_PIN);
+  ultimaTentativaBNO = millis();
+
+  if (bnoDisponivel) {
+    ultimaAtualizacaoBNO = ultimaTentativaBNO;
+    Serial.println("BNO055 inicializado; telemetria sera enviada ao Body.");
+  } else {
+    Serial.println(
+        "ERRO: BNO055 nao encontrado em SDA=8/SCL=9; nova tentativa em 1 s. "
+        "Body deve manter os motores parados.");
+  }
+}
+
 void imprimirDados() {
   Serial.print("LOW%: ");
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
@@ -161,10 +178,7 @@ void setup() {
   Serial.begin(115200);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
 
-  bnoDisponivel = sensorBNO.begin(BNO_SDA_PIN, BNO_SCL_PIN);
-  if (!bnoDisponivel) {
-    Serial.println("ERRO: BNO055 nao encontrado em SDA=8/SCL=9; BODY deve manter os motores parados.");
-  }
+  iniciarBNO();
 
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
     if (pinos[i] >= 34 && pinos[i] <= 39) pinMode(pinos[i], INPUT);
@@ -173,7 +187,9 @@ void setup() {
 
   inicioJanela = micros();
   Serial.println("Coroa TSSP4038 - 16 sensores");
-  Serial.println("Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP e telemetria BNO055 ativos.");
+  Serial.println(
+      "Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP ativo. "
+      "Telemetria BNO055 sera enviada apos inicializacao do sensor.");
 }
 
 void loop() {
@@ -189,6 +205,11 @@ void loop() {
   }
 
   const uint32_t agoraMs = millis();
+  if (!bnoDisponivel &&
+      (uint32_t)(agoraMs - ultimaTentativaBNO) >=
+          INTERVALO_TENTATIVA_BNO_MS) {
+    iniciarBNO();
+  }
   if (bnoDisponivel &&
       (uint32_t)(agoraMs - ultimaAtualizacaoBNO) >= INTERVALO_BNO_MS) {
     ultimaAtualizacaoBNO = agoraMs;
