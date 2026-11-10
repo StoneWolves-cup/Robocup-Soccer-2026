@@ -1,75 +1,65 @@
 #include <Arduino.h>
-#include <TSSP.h>
+#include <math.h>
 #include <IRProtocol.h>
 #include <BNO055.h>
-#include <Ultrassonicos.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
-#include <math.h>
-#include <string.h>
 
 namespace {
-constexpr int UART_RX_PIN = 7;
-constexpr int UART_TX_PIN = 10;
-constexpr uint32_t UART_BAUD = 115200;
+constexpr uint8_t NUM_SENSORES = IR_SENSOR_COUNT;
+constexpr uint32_t JANELA_US = 5000;
+constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
-constexpr uint32_t INTERVALO_SERIAL_MS = 100;
-constexpr uint32_t PERIODO_BNO_MS = 10;
-constexpr uint32_t PERIODO_ULTRASSONICOS_MS = 100;
+constexpr uint32_t INTERVALO_BNO_MS = 10;
+constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
-constexpr float ALPHA_DIRECAO = 0.25f;
-const float ANGULOS_GRAUS[IR_SENSOR_COUNT] = {
+constexpr uint32_t UART_BAUD = 115200;
+constexpr int UART_RX_PIN = 18;
+constexpr int UART_TX_PIN = 17;
+constexpr uint8_t BNO_SDA_PIN = 8;
+constexpr uint8_t BNO_SCL_PIN = 9;
+
+// Mesma ordem de pinos, angulos e aquisicao usada no teste TSSP de 16 sensores.
+const uint8_t pinos[NUM_SENSORES] = {
+  21, 47, 48, 38, 39, 40, 41,
+  42, 16, 15, 7, 6, 5, 4, 1, 2
+};
+const float angulosSensores[NUM_SENSORES] = {
   0.0f, 22.5f, 45.0f, 67.5f, 90.0f, 112.5f, 135.0f, 157.5f,
   180.0f, 202.5f, 225.0f, 247.5f, 270.0f, 292.5f, 315.0f, 337.5f
 };
 
-TSSP sensores;
-BNO055 bno;
-Ultrassonicos ultrassonicos;
-uint16_t sequenciaIR = 0;
-uint16_t sequenciaBNO = 0;
+uint32_t totalAmostras = 0;
+uint32_t lowCount[NUM_SENSORES] = {};
+float atividade[NUM_SENSORES] = {};
+float peso[NUM_SENSORES] = {};
 float vetorXFiltrado = 0.0f;
 float vetorYFiltrado = 0.0f;
 float somaPesosFiltrada = 0.0f;
 bool filtroIniciado = false;
+uint32_t inicioJanela = 0;
+uint32_t ultimaSerial = 0;
+uint32_t ultimoEnvio = 0;
+uint16_t sequenciaIR = 0;
+uint16_t sequenciaBNO = 0;
+float direcaoGraus = 0.0f;
+float confianca = 0.0f;
+bool bolaDetectada = false;
+BNO055 sensorBNO;
 bool bnoDisponivel = false;
-SemaphoreHandle_t travaUART = nullptr;
+uint32_t ultimaAtualizacaoBNO = 0;
 
-void tarefaLeituraUltrassonicos(void *) {
-  float distancias[Ultrassonicos::QUANTIDADE] = {};
-  bool validas[Ultrassonicos::QUANTIDADE] = {};
-  for (;;) {
-    ultrassonicos.ler(distancias, validas);
-    Serial.print("Ultrassonicos cm:");
-    for (uint8_t i = 0; i < Ultrassonicos::QUANTIDADE; ++i) {
-      Serial.print(" ECHO");
-      Serial.print(Ultrassonicos::PINOS_ECHO[i]);
-      Serial.print('=');
-      if (validas[i]) Serial.print(distancias[i], 1);
-      else Serial.print("sem leitura");
-    }
-    Serial.println();
-    vTaskDelay(pdMS_TO_TICKS(PERIODO_ULTRASSONICOS_MS));
-  }
-}
+// Copiada do TEST_TSSP/TSSP_16_test.cpp para manter o mesmo calculo vetorial.
+void calcularDirecao() {
+  float x = 0.0f;
+  float y = 0.0f;
+  float somaPesos = 0.0f;
 
-void imprimirDadosSensores() {
-  float x = 0.0f, y = 0.0f, somaPesos = 0.0f;
-  Serial.print("IR Head LOW% [");
-  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
-    const float atividade = sensores.atividadePercentual(i);
-    Serial.print('S');
-    Serial.print(i);
-    Serial.print('=');
-    Serial.print(atividade, 1);
-    if (i < IR_SENSOR_COUNT - 1) Serial.print(" | ");
-
-    const float peso = fmaxf(0.0f, atividade - LIMIAR_ATIVIDADE);
-    const float rad = ANGULOS_GRAUS[i] * DEG_TO_RAD;
-    x += peso * cosf(rad);
-    y += peso * sinf(rad);
-    somaPesos += peso;
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    peso[i] = fmaxf(0.0f, atividade[i] - LIMIAR_ATIVIDADE);
+    const float rad = angulosSensores[i] * DEG_TO_RAD;
+    x += peso[i] * cosf(rad);
+    y += peso[i] * sinf(rad);
+    somaPesos += peso[i];
   }
 
   if (!filtroIniciado) {
@@ -78,120 +68,139 @@ void imprimirDadosSensores() {
     somaPesosFiltrada = somaPesos;
     filtroIniciado = true;
   } else {
-        vetorXFiltrado = ALPHA_DIRECAO * x
-                   + (1.0f - ALPHA_DIRECAO) * vetorXFiltrado;
-    vetorYFiltrado = ALPHA_DIRECAO * y
-                   + (1.0f - ALPHA_DIRECAO) * vetorYFiltrado;
-    somaPesosFiltrada = ALPHA_DIRECAO * somaPesos
-                      + (1.0f - ALPHA_DIRECAO) * somaPesosFiltrada;
+    vetorXFiltrado = ALPHA * x + (1.0f - ALPHA) * vetorXFiltrado;
+    vetorYFiltrado = ALPHA * y + (1.0f - ALPHA) * vetorYFiltrado;
+    somaPesosFiltrada =
+        ALPHA * somaPesos + (1.0f - ALPHA) * somaPesosFiltrada;
   }
 
-  float confianca = 0.0f;
-  float direcao = 0.0f;
-  const bool atividadeValida = somaPesos > 0.0f && somaPesosFiltrada > 0.0f;
-  if (atividadeValida) {
-    confianca = sqrtf(vetorXFiltrado * vetorXFiltrado + vetorYFiltrado * vetorYFiltrado)
-                / somaPesosFiltrada;
-    direcao = atan2f(vetorYFiltrado, vetorXFiltrado) * RAD_TO_DEG;
-    if (direcao < 0.0f) direcao += 360.0f;
-    if (direcao > 180.0f) direcao -= 360.0f;
+  if (somaPesos <= 0.0f || somaPesosFiltrada <= 0.0f) {
+    bolaDetectada = false;
+    confianca = 0.0f;
+    return;
   }
-  const bool bolaDetectada = atividadeValida && confianca >= CONFIANCA_MIN;
 
-  Serial.print("] | Bola: ");
+  const float moduloFiltrado = sqrtf(
+      vetorXFiltrado * vetorXFiltrado + vetorYFiltrado * vetorYFiltrado);
+  confianca = moduloFiltrado / somaPesosFiltrada;
+  if (confianca < CONFIANCA_MIN) {
+    bolaDetectada = false;
+    return;
+  }
+
+  direcaoGraus = atan2f(vetorYFiltrado, vetorXFiltrado) * RAD_TO_DEG;
+  if (direcaoGraus < 0.0f) direcaoGraus += 360.0f;
+  if (direcaoGraus > 180.0f) direcaoGraus -= 360.0f;
+  bolaDetectada = true;
+}
+
+void fecharJanela() {
+  if (totalAmostras == 0) return;
+
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    atividade[i] = 100.0f * lowCount[i] / totalAmostras;
+    lowCount[i] = 0;
+  }
+
+  totalAmostras = 0;
+  calcularDirecao();
+}
+
+void transmitirIR() {
+  IRActivityPacket pacote{};
+  pacote.magic = IR_PACKET_MAGIC;
+  pacote.version = IR_PACKET_VERSION;
+  pacote.sequence = sequenciaIR++;
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    pacote.activity[i] = static_cast<uint8_t>(atividade[i] + 0.5f);
+  }
+  pacote.directionTenthsDegrees = bolaDetectada
+      ? static_cast<int16_t>(lroundf(direcaoGraus * 10.0f)) : 0;
+  int confiancaPercentual = static_cast<int>(lroundf(confianca * 100.0f));
+  if (confiancaPercentual < 0) confiancaPercentual = 0;
+  if (confiancaPercentual > 100) confiancaPercentual = 100;
+  pacote.confidencePercent = static_cast<uint8_t>(confiancaPercentual);
+  pacote.ballDetected = bolaDetectada ? 1 : 0;
+  pacote.checksum = irPacketChecksum(pacote);
+  Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
+}
+
+void transmitirBNO() {
+  if (!bnoDisponivel) return;
+
+  BNODataPacket pacote{};
+  pacote.magic = BNO_PACKET_MAGIC;
+  pacote.version = BNO_PACKET_VERSION;
+  pacote.sequence = sequenciaBNO++;
+  pacote.headingDegrees = sensorBNO.getHeading();
+  pacote.gyroZDegreesPerSecond = sensorBNO.getGyroZ();
+  pacote.checksum = bnoPacketChecksum(pacote);
+  Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
+}
+
+void imprimirDados() {
+  Serial.print("LOW%: ");
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    Serial.print(atividade[i], 1);
+    if (i < NUM_SENSORES - 1) Serial.print(',');
+  }
+
+  Serial.print(" | Bola: ");
   Serial.print(bolaDetectada ? "SIM" : "NAO");
   if (bolaDetectada) {
     Serial.print(" | Direcao: ");
-    Serial.print(direcao, 1);
+    Serial.print(direcaoGraus, 1);
     Serial.print(" graus");
   }
   Serial.print(" | Confianca: ");
   Serial.println(confianca, 2);
 }
-
-void transmitirPacote(const void *pacote, size_t tamanho) {
-  if (xSemaphoreTake(travaUART, portMAX_DELAY) == pdTRUE) {
-    Serial1.write(static_cast<const uint8_t *>(pacote), tamanho);
-    xSemaphoreGive(travaUART);
-  }
-}
-
-void transmitirAtividades() {
-  IRActivityPacket pacote{};
-  pacote.magic = IR_PACKET_MAGIC;
-  pacote.version = IR_PACKET_VERSION;
-  pacote.sequence = sequenciaIR++;
-  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
-    pacote.activity[i] = sensores.atividadePercentual(i);
-  }
-  pacote.checksum = irPacketChecksum(pacote);
-  transmitirPacote(&pacote, sizeof(pacote));
-}
-
-void tarefaLeituraIR(void *) {
-  uint32_t ultimoEnvio = millis();
-  uint32_t ultimaSerial = millis();
-  for (;;) {
-    sensores.atualizar();
-    const uint32_t agora = millis();
-    if ((uint32_t)(agora - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
-      ultimoEnvio = agora;
-      transmitirAtividades();
-    }
-    if ((uint32_t)(agora - ultimaSerial) >= INTERVALO_SERIAL_MS) {
-      ultimaSerial = agora;
-      imprimirDadosSensores();
-    }
-    vTaskDelay(1);
-  }
-}
-
-void tarefaLeituraBNO(void *) {
-  BNODataPacket pacote{};
-  for (;;) {
-    if (!bnoDisponivel) {
-      // Pinagem I2C do BNO055 no Head; a pinagem TSSP permanece inalterada.
-      bnoDisponivel = bno.begin(8, 9);
-      if (!bnoDisponivel) {
-        Serial.println("BNO055 indisponivel; nova tentativa em 1 s");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        continue;
-      }
-      Serial.println("BNO055 OK no Head");
-    }
-
-    bno.update();
-    pacote.magic = BNO_PACKET_MAGIC;
-    pacote.version = BNO_PACKET_VERSION;
-    pacote.sequence = sequenciaBNO++;
-    pacote.headingDegrees = bno.getHeading();
-    pacote.gyroZDegreesPerSecond = bno.getGyroZ();
-    pacote.checksum = bnoPacketChecksum(pacote);
-    transmitirPacote(&pacote, sizeof(pacote));
-    vTaskDelay(pdMS_TO_TICKS(PERIODO_BNO_MS));
-  }
-}
 } // namespace
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Monitor IR do Head ativo: 16 sensores, atualizacao a cada 100 ms.");
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
-  travaUART = xSemaphoreCreateMutex();
-  if (travaUART == nullptr) {
-    Serial.println("ERRO: nao foi possivel criar mutex da UART");
-    while (true) delay(1000);
+
+  bnoDisponivel = sensorBNO.begin(BNO_SDA_PIN, BNO_SCL_PIN);
+  if (!bnoDisponivel) {
+    Serial.println("ERRO: BNO055 nao encontrado em SDA=8/SCL=9; BODY deve manter os motores parados.");
   }
-  sensores.begin();
-  ultrassonicos.begin();
-  Serial.printf("UART1 pronta | %lu baud | RX=%d TX=%d\n",
-                static_cast<unsigned long>(UART_BAUD), UART_RX_PIN, UART_TX_PIN);
-  xTaskCreatePinnedToCore(tarefaLeituraIR, "LeituraIR", 4096, nullptr, 2, nullptr, 1);
-  xTaskCreatePinnedToCore(tarefaLeituraBNO, "LeituraBNO", 4096, nullptr, 2, nullptr, 0);
-  xTaskCreatePinnedToCore(tarefaLeituraUltrassonicos, "LeituraUltrassonicos",
-                          3072, nullptr, 1, nullptr, 1);
+
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    if (pinos[i] >= 34 && pinos[i] <= 39) pinMode(pinos[i], INPUT);
+    else pinMode(pinos[i], INPUT_PULLUP);
+  }
+
+  inicioJanela = micros();
+  Serial.println("Coroa TSSP4038 - 16 sensores");
+  Serial.println("Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP e telemetria BNO055 ativos.");
 }
 
 void loop() {
-  vTaskDelay(portMAX_DELAY);
+  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
+    if (digitalRead(pinos[i]) == LOW) lowCount[i]++;
+  }
+  totalAmostras++;
+
+  const uint32_t agoraUs = micros();
+  if ((uint32_t)(agoraUs - inicioJanela) >= JANELA_US) {
+    fecharJanela();
+    inicioJanela = agoraUs;
+  }
+
+  const uint32_t agoraMs = millis();
+  if (bnoDisponivel &&
+      (uint32_t)(agoraMs - ultimaAtualizacaoBNO) >= INTERVALO_BNO_MS) {
+    ultimaAtualizacaoBNO = agoraMs;
+    sensorBNO.update();
+  }
+  if ((uint32_t)(agoraMs - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
+    ultimoEnvio = agoraMs;
+    transmitirIR();
+    transmitirBNO();
+  }
+  if ((uint32_t)(agoraMs - ultimaSerial) >= SERIAL_MS) {
+    ultimaSerial = agoraMs;
+    imprimirDados();
+  }
 }

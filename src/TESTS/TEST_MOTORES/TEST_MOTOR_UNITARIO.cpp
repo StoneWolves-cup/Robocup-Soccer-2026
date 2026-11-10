@@ -1,9 +1,9 @@
 #include <Arduino.h>
 
 // M1 no L298N 1
-constexpr uint8_t M1_PWM = 15;
-constexpr uint8_t M1_IN1 = 2;
-constexpr uint8_t M1_IN2 = 4;
+constexpr uint8_t M1_PWM = 4;
+constexpr uint8_t M1_IN1 = 6;
+constexpr uint8_t M1_IN2 = 5;
 constexpr uint32_t TEMPO_SENTIDO_MS = 2000;
 constexpr uint32_t TEMPO_PARADO_MS = 1000;
 constexpr uint8_t POTENCIA_MAXIMA = HIGH; // EN em HIGH aplica 100% do sinal.

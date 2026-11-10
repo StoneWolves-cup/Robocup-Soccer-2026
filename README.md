@@ -98,12 +98,13 @@ Our objective is to develop autonomous robots capable of playing soccer through 
 <ul align=center>
   <li>Fusion 360</li>
   <li>Arduino IDE</li>
-  <li>ESP32-S3 (UART entre Head e Body)</li>
+  <li>ESP32-S3 (UART1 entre Head e Body)</li>
 </ul>
 
-<p>UART1 a 115200 baud: ligue TX GPIO10 do Head ao RX GPIO7 do Body e TX
-GPIO10 do Body ao RX GPIO7 do Head, com GND comum. O fluxo de dados atual vai
-do Head ao Body; as leituras IR aparecem no monitor serial do Head.</p>
+<p>O Head envia os dados dos 16 sensores TSSP ao Body pela UART1 a 115200 baud,
+8N1. Ligue TX GPIO17 do Head a RX GPIO18 do Body e una os GNDs. O Body acende
+o RGB em vermelho enquanto aguarda dados validos e em verde quando a UART esta
+ativa. As leituras e a direcao da bola aparecem no monitor serial do Head.</p>
 
 <hr>
 
