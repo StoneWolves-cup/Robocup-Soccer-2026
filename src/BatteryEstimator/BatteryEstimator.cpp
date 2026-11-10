@@ -1,4 +1,4 @@
-#include "../include/BatteryEstimator.h"
+#include <BatteryEstimator.h>
 
 // ----------------------------------------------------------------------
 // Curva de calibração: tensão (V) -> percentual (%)

@@ -9,33 +9,33 @@ class Motores
 private:
 
     // ========================================================
-    // L298N 1
+    // TB6612FNG 1
     // ========================================================
 
     // M1
-    static constexpr uint8_t M1_PWM  = 13;
-    static constexpr uint8_t M1_IN1 = 12;
-    static constexpr uint8_t M1_IN2 = 14;
+    static constexpr uint8_t M1_PWM  = 4;
+    static constexpr uint8_t M1_IN1 = 6;
+    static constexpr uint8_t M1_IN2 = 5;
 
     // M3
-    static constexpr uint8_t M3_PWM  = 25;
-    static constexpr uint8_t M3_IN1 = 27;
-    static constexpr uint8_t M3_IN2 = 26;
+    static constexpr uint8_t M3_PWM  = 16;
+    static constexpr uint8_t M3_IN1 = 7;
+    static constexpr uint8_t M3_IN2 = 15;
 
 
     // ========================================================
-    // L298N 2
+    // TB6612FNG 2
     // ========================================================
 
     // M4
-    static constexpr uint8_t M4_PWM = 15;
-    static constexpr uint8_t M4_IN1 = 2;
-    static constexpr uint8_t M4_IN2 = 4;
+    static constexpr uint8_t M4_PWM = 9;
+    static constexpr uint8_t M4_IN1 = 3;
+    static constexpr uint8_t M4_IN2 = 46;
 
     // M2
-    static constexpr uint8_t M2_PWM  = 5;
-    static constexpr uint8_t M2_IN1 = 16;
-    static constexpr uint8_t M2_IN2 = 17;
+    static constexpr uint8_t M2_PWM  = 37;
+    static constexpr uint8_t M2_IN1 = 8;
+    static constexpr uint8_t M2_IN2 = 38;
 
     // Ajuste para inverter individualmente um motor, se necessario.
     static constexpr float INV_M1 = 1.0f;

@@ -1,25 +1,37 @@
 #include <Arduino.h>
 
-// Pinos dos quatro motores nos dois drivers L298N.
-constexpr uint8_t M1_PWM = 15;
-constexpr uint8_t M1_IN1 = 2;
-constexpr uint8_t M1_IN2 = 4;
+// ========================================================
+// TB6612FNG 1
+// ========================================================
 
-constexpr uint8_t M3_PWM = 5;
-constexpr uint8_t M3_IN1 = 16;
-constexpr uint8_t M3_IN2 = 17;
+    static constexpr uint8_t M1_PWM  = 4;
+    static constexpr uint8_t M1_IN1 = 6;
+    static constexpr uint8_t M1_IN2 = 5;
 
-constexpr uint8_t M4_PWM = 13;
-constexpr uint8_t M4_IN1 = 12;
-constexpr uint8_t M4_IN2 = 14;
+    // M3
+    static constexpr uint8_t M3_PWM  = 16;
+    static constexpr uint8_t M3_IN1 = 7;
+    static constexpr uint8_t M3_IN2 = 15;
 
-constexpr uint8_t M2_PWM = 25;
-constexpr uint8_t M2_IN1 = 27;
-constexpr uint8_t M2_IN2 = 26;
+
+    // ========================================================
+    // TB6612FNG 2
+    // ========================================================
+
+    // M4
+    static constexpr uint8_t M4_PWM = 9;
+    static constexpr uint8_t M4_IN1 = 3;
+    static constexpr uint8_t M4_IN2 = 46;
+
+    // M2
+    static constexpr uint8_t M2_PWM  = 37;
+    static constexpr uint8_t M2_IN1 = 8;
+    static constexpr uint8_t M2_IN2 = 38;
 
 constexpr uint32_t TEMPO_SENTIDO_MS = 2000;
 constexpr uint32_t TEMPO_PARADO_MS = 1000;
-constexpr uint8_t POTENCIA_MAXIMA = HIGH; // EN em HIGH aplica 100% do sinal.
+constexpr float POTENCIA_PERCENTUAL = 89.0f;
+constexpr uint8_t POTENCIA_PWM = (255 * POTENCIA_PERCENTUAL + 50) / 100;
 
 void configurarMotor(uint8_t en, uint8_t in1, uint8_t in2)
 {
@@ -48,11 +60,11 @@ void definirSentido(bool frente)
 
 void habilitarMotores(bool habilitado)
 {
-    const uint8_t nivel = habilitado ? POTENCIA_MAXIMA : LOW;
-    digitalWrite(M1_PWM, nivel);
-    digitalWrite(M2_PWM, nivel);
-    digitalWrite(M3_PWM, nivel);
-    digitalWrite(M4_PWM, nivel);
+    const uint8_t potencia = habilitado ? POTENCIA_PWM : 0;
+    analogWrite(M1_PWM, potencia);
+    analogWrite(M2_PWM, potencia);
+    analogWrite(M3_PWM, potencia);
+    analogWrite(M4_PWM, potencia);
 }
 
 void setup()
@@ -65,7 +77,7 @@ void setup()
 
 void loop()
 {
-    // Todos os motores giram juntos no primeiro sentido, em potencia maxima.
+    // Todos os motores giram juntos no primeiro sentido, em 67% de potencia.
     definirSentido(true);
     habilitarMotores(true);
     delay(TEMPO_SENTIDO_MS);

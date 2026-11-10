@@ -10,7 +10,7 @@ class BNO055
 public:
     BNO055();
 
-    bool begin(uint8_t sda = 21, uint8_t scl = 22);
+    bool begin(uint8_t sda = 8, uint8_t scl = 9);
     void update();
     void zero();
     void calibrateNorth();

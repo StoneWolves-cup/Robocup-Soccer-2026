@@ -21,8 +21,8 @@ constexpr uint8_t NUM_SENSORES = 16;
 // O índice de cada pino deve corresponder ao mesmo índice
 // da tabela angulosSensores.
 const uint8_t pinos[NUM_SENSORES] = {
-  34, 23, 22, 21, 19, 18, 17, 16,
-  4, 14, 13, 27, 26, 25, 33, 32
+  21, 47, 48, 38, 39, 40, 41,
+  42, 16, 15, 7, 6, 5, 4, 1, 2 
 };
 
 // Ângulo nominal de cada sensor em relação à frente do robô.
