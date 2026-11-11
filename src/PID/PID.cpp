@@ -34,6 +34,13 @@ PID::PID(
     reset();
 }
 
+void PID::setGains(float kp, float ki, float kd)
+{
+    this->kp = kp;
+    this->ki = ki;
+    this->kd = kd;
+}
+
 void PID::setIntegralLimit(float limit)
 {
     integralLimit = fabs(limit);

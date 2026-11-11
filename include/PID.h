@@ -31,6 +31,7 @@ public:
         float outputMax
     );
 
+    void setGains(float kp, float ki, float kd);
 
     void reset();
 
