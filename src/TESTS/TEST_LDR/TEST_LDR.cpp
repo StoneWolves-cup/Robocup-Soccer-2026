@@ -33,6 +33,8 @@ bool whiteCaptured = false;
 bool greenCaptured = false;
 bool regionWhiteIsHigher[REGION_COUNT] = {};
 bool regionIsWhite[REGION_COUNT] = {};
+bool sensorWhiteIsHigher[SENSOR_COUNT] = {};
+bool sensorIsWhite[SENSOR_COUNT] = {};
 
 uint16_t absoluteDifference(uint16_t first, uint16_t second)
 {
@@ -82,7 +84,11 @@ void captureReference(uint16_t reference[SENSOR_COUNT])
 void prepareClassification()
 {
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
+    {
         threshold[i] = (whiteReference[i] + greenReference[i]) / 2;
+        sensorWhiteIsHigher[i] = whiteReference[i] >= greenReference[i];
+        sensorIsWhite[i] = sensorWhiteIsHigher[i];
+    }
 
     for (uint8_t region = 0; region < REGION_COUNT; ++region)
     {
@@ -132,6 +138,30 @@ bool isRegionWhite(uint8_t region, uint16_t value)
     return regionIsWhite[region];
 }
 
+bool isCenterSensorWhite(uint8_t sensor, uint16_t value)
+{
+    const uint16_t difference =
+        absoluteDifference(whiteReference[sensor], greenReference[sensor]);
+    const uint16_t margin = difference / HYSTERESIS_DIVISOR;
+    const uint16_t sensorThreshold = threshold[sensor];
+
+    if (sensorWhiteIsHigher[sensor])
+    {
+        if ((uint32_t)value > (uint32_t)sensorThreshold + margin)
+            sensorIsWhite[sensor] = true;
+        else if ((uint32_t)value + margin < sensorThreshold)
+            sensorIsWhite[sensor] = false;
+    }
+    else
+    {
+        if ((uint32_t)value + margin < sensorThreshold)
+            sensorIsWhite[sensor] = true;
+        else if ((uint32_t)value > (uint32_t)sensorThreshold + margin)
+            sensorIsWhite[sensor] = false;
+    }
+    return sensorIsWhite[sensor];
+}
+
 void printReadings()
 {
     uint16_t readings[SENSOR_COUNT];
@@ -155,18 +185,38 @@ void printReadings()
         for (uint8_t region = 0; region < REGION_COUNT; ++region)
         {
             uint32_t total = 0;
+            uint8_t whiteSensors = 0;
             for (uint8_t i = 0; i < REGION_SENSOR_COUNTS[region]; ++i)
-                total += readings[REGION_CHANNELS[region][i]];
+            {
+                const uint8_t sensor = REGION_CHANNELS[region][i];
+                total += readings[sensor];
+                if (region == 0 && isCenterSensorWhite(sensor, readings[sensor]))
+                    ++whiteSensors;
+            }
 
             const uint16_t average = total / REGION_SENSOR_COUNTS[region];
             Serial.print(REGION_NAMES[region]);
             Serial.print(": ");
-            Serial.print(isRegionWhite(region, average) ? "BRANCO" : "VERDE");
-            Serial.print(" (media ");
-            Serial.print(average);
-            Serial.print(", limiar ");
-            Serial.print(regionThreshold[region]);
-            Serial.print(")");
+            const bool regionIsWhite = region == 0
+                ? whiteSensors >= 2
+                : isRegionWhite(region, average);
+            Serial.print(regionIsWhite ? "BRANCO" : "VERDE");
+            if (region == 0)
+            {
+                Serial.print(" (LDRs brancos ");
+                Serial.print(whiteSensors);
+                Serial.print("/9; movimento ideal: ");
+                Serial.print(regionIsWhite ? "para frente" : "parado");
+                Serial.print(")");
+            }
+            else
+            {
+                Serial.print(" (media ");
+                Serial.print(average);
+                Serial.print(", limiar ");
+                Serial.print(regionThreshold[region]);
+                Serial.print(")");
+            }
             if (region + 1 < REGION_COUNT)
                 Serial.print(" | ");
         }

@@ -4,7 +4,7 @@
 #include <IRProtocol.h>
 #include <Omni.h>
 #include <Motores.h>
-#include <PID.h>
+#include <FuzzyPID.h>
 #include <freertos/FreeRTOS.h>
 
 void IHM_begin();
@@ -16,20 +16,53 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool irValido);
 
 namespace {
+constexpr uint32_t USB_SERIAL_BAUD = 460800;
 constexpr uint32_t UART_BAUD = 115200;
 constexpr uint32_t TIMEOUT_PACOTE_MS = 250;
+constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
+constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
+constexpr bool USAR_LDR = false;
 // GPIOs reservados para a UART, fora dos pinos atuais de motores e da IHM.
 constexpr int UART_RX_PIN = 18;
 constexpr int UART_TX_PIN = 17;
 constexpr uint32_t TIMEOUT_BNO_MS = 250;
-constexpr float POTENCIA_MAXIMA_MOTORES = 0.50f;
-constexpr float VELOCIDADE_SEGUIR = 1.0f;
-constexpr float KP_CORRECAO_RUMO = 0.469f;
-constexpr float KI_CORRECAO_RUMO = 0.00002f;
-constexpr float KD_CORRECAO_RUMO = 0.0056f;
-constexpr float ZONA_MORTA_RUMO_GRAUS = 2.0f;
-constexpr float ROTACAO_MAXIMA_CORRECAO = 0.30f;
+constexpr float POTENCIA_MAXIMA_MOTORES = 0.80f;
+constexpr float VELOCIDADE_CORRECAO_LINHA = 1.0f;
+constexpr float KP_CORRECAO_RUMO = 0.00582f;
+constexpr float KI_CORRECAO_RUMO = 0.0000032f;
+constexpr float KD_CORRECAO_RUMO = 0.00074f;
+constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
+constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
+constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
+constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
 constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
+constexpr uint8_t LDR_SENSOR_COUNT = 15;
+constexpr uint8_t LDR_REGION_COUNT = 4;
+constexpr uint8_t LDR_MUX_SIG = 14;
+constexpr uint8_t LDR_MUX_S0 = 10;
+constexpr uint8_t LDR_MUX_S1 = 11;
+constexpr uint8_t LDR_MUX_S2 = 12;
+constexpr uint8_t LDR_MUX_S3 = 13;
+constexpr uint8_t LDR_SAMPLE_COUNT = 12;
+constexpr uint8_t LDR_DISCARD_COUNT = 2;
+constexpr uint8_t LDR_CALIBRATION_SAMPLES = 8;
+constexpr uint8_t LDR_HYSTERESIS_DIVISOR = 8;
+
+enum RegiaoLDR : uint8_t {
+  LDR_CENTRO,
+  LDR_ESQUERDA,
+  LDR_DIREITA,
+  LDR_INFERIOR
+};
+
+const char *const NOMES_REGIOES_LDR[LDR_REGION_COUNT] = {
+    "Centro", "Esquerda", "Direita", "Inferior"};
+const uint8_t CANAIS_REGIOES_LDR[LDR_REGION_COUNT][9] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 14},
+    {12, 13},
+    {8, 9},
+    {10, 11}};
+const uint8_t CONTAGENS_REGIOES_LDR[LDR_REGION_COUNT] = {9, 2, 2, 2};
 
 struct QuadroRecebido {
   IRActivityPacket pacote;
@@ -67,14 +100,37 @@ UltraDataPacket ultimoPacoteUltra{};
 uint8_t ultimaAtividadeIR[IR_SENSOR_COUNT] = {};
 bool pacoteUltraInicialRecebido = false;
 bool pacoteBNOInicialRecebido = false;
+uint32_t ultimoPacoteIRUARTMs = 0;
+uint32_t ultimoPacoteBNOUARTMs = 0;
+bool pacoteIRUARTRecebido = false;
+bool pacoteBNOUARTRecebido = false;
 bool referenciaRumoDefinida = false;
 float rumoDesejadoGraus = 0.0f;
 uint32_t ultimoCalculoPIDUs = 0;
-uint32_t ultimoPacoteUARTMs = 0;
-bool pacoteUARTRecebido = false;
 bool ledUARTVerde = false;
+uint32_t bytesUARTDesdeDiagnostico = 0;
+uint32_t pacotesIRDesdeDiagnostico = 0;
+uint32_t pacotesBNODesteDiagnostico = 0;
+uint32_t pacotesUltraDesdeDiagnostico = 0;
+uint32_t quadrosInvalidosDesdeDiagnostico = 0;
+uint32_t ultimoDiagnosticoUARTMs = 0;
+const char *ultimoErroUART = nullptr;
+const char *ultimoBloqueioMovimento = nullptr;
+uint32_t ultimaMensagemBloqueioMs = 0;
 bool ultimaBolaDetectada = false;
 float ultimaDirecaoBola = 0.0f;
+float ultimaCorrecaoRumo = 0.0f;
+uint16_t referenciaBrancaLDR[LDR_SENSOR_COUNT] = {};
+uint16_t referenciaVerdeLDR[LDR_SENSOR_COUNT] = {};
+uint16_t limiarLDR[LDR_SENSOR_COUNT] = {};
+uint16_t referenciaBrancaRegiaoLDR[LDR_REGION_COUNT] = {};
+uint16_t referenciaVerdeRegiaoLDR[LDR_REGION_COUNT] = {};
+uint16_t limiarRegiaoLDR[LDR_REGION_COUNT] = {};
+bool referenciaBrancaCapturadaLDR = false;
+bool referenciaVerdeCapturadaLDR = false;
+bool brancoAcimaLDR[LDR_REGION_COUNT] = {};
+bool regiaoBrancaLDR[LDR_REGION_COUNT] = {};
+bool sensorBrancoLDR[LDR_SENSOR_COUNT] = {};
 constexpr size_t TAMANHO_MAXIMO_PACOTE =
     sizeof(IRActivityPacket) > sizeof(BNODataPacket)
         ? (sizeof(IRActivityPacket) > sizeof(UltraDataPacket)
@@ -86,13 +142,17 @@ size_t bytesNoBufferUART = 0;
 
 Motores motores;
 Omni omni;
-PID pidCorrecaoRumo(KP_CORRECAO_RUMO, KI_CORRECAO_RUMO,
-                    KD_CORRECAO_RUMO, -ROTACAO_MAXIMA_CORRECAO,
-                    ROTACAO_MAXIMA_CORRECAO);
+FuzzyPID pidCorrecaoRumo(
+    KP_CORRECAO_RUMO, KI_CORRECAO_RUMO, KD_CORRECAO_RUMO,
+    -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO,
+    ESCALA_ERRO_FUZZY_GRAUS, ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO);
 
 void atualizarLedUART() {
-  const bool comunicacaoConfirmada = pacoteUARTRecebido &&
-      (uint32_t)(millis() - ultimoPacoteUARTMs) <= TIMEOUT_PACOTE_MS;
+  const uint32_t agoraMs = millis();
+  const bool comunicacaoConfirmada = pacoteIRUARTRecebido &&
+      pacoteBNOUARTRecebido &&
+      (uint32_t)(agoraMs - ultimoPacoteIRUARTMs) <= TIMEOUT_PACOTE_MS &&
+      (uint32_t)(agoraMs - ultimoPacoteBNOUARTMs) <= TIMEOUT_BNO_MS;
   if (comunicacaoConfirmada == ledUARTVerde) return;
 
   neopixelWrite(RGB_BUILTIN,
@@ -102,16 +162,21 @@ void atualizarLedUART() {
   ledUARTVerde = comunicacaoConfirmada;
 }
 
-void confirmarPacoteUART() {
-  ultimoPacoteUARTMs = millis();
-  pacoteUARTRecebido = true;
+void confirmarPacoteIRUART() {
+  ultimoPacoteIRUARTMs = millis();
+  pacoteIRUARTRecebido = true;
+  atualizarLedUART();
+}
+
+void confirmarPacoteBNOUART() {
+  ultimoPacoteBNOUARTMs = millis();
+  pacoteBNOUARTRecebido = true;
   atualizarLedUART();
 }
 
 void registrarFalhaUART(const char *motivo) {
-  (void)motivo;
-  pacoteUARTRecebido = false;
-  atualizarLedUART();
+  ++quadrosInvalidosDesdeDiagnostico;
+  ultimoErroUART = motivo;
 }
 
 bool receberPacote(const uint8_t *dados, int tamanho) {
@@ -143,7 +208,8 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("resultado TSSP invalido no quadro IR");
       return false;
     }
-    confirmarPacoteUART();
+    ++pacotesIRDesdeDiagnostico;
+    confirmarPacoteIRUART();
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroRecebido.pacote, &copia, sizeof(copia));
     quadroRecebido.recebidoEmMs = millis();
@@ -167,7 +233,14 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("checksum invalido no quadro BNO055");
       return false;
     }
-    confirmarPacoteUART();
+    if (!isfinite(copia.headingDegrees) ||
+        !isfinite(copia.gyroZDegreesPerSecond) ||
+        copia.headingDegrees < -180.0f || copia.headingDegrees >= 180.0f) {
+      registrarFalhaUART("heading ou gyro invalido no quadro BNO055");
+      return false;
+    }
+    ++pacotesBNODesteDiagnostico;
+    confirmarPacoteBNOUART();
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroBNORecebido.pacote, &copia, sizeof(copia));
     quadroBNORecebido.recebidoEmMs = millis();
@@ -191,7 +264,7 @@ bool receberPacote(const uint8_t *dados, int tamanho) {
       registrarFalhaUART("checksum invalido no quadro ultrassonico");
       return false;
     }
-    confirmarPacoteUART();
+    ++pacotesUltraDesdeDiagnostico;
     portENTER_CRITICAL(&travaQuadro);
     memcpy((void *)&quadroUltraRecebido.pacote, &copia, sizeof(copia));
     quadroUltraRecebido.recebidoEmMs = millis();
@@ -215,7 +288,10 @@ void processarUART() {
     if (bytesNoBufferUART == sizeof(bufferUART)) {
       memmove(bufferUART, bufferUART + 1, --bytesNoBufferUART);
     }
-    const uint8_t byteRecebido = static_cast<uint8_t>(Serial1.read());
+    const int leitura = Serial1.read();
+    if (leitura < 0) return;
+    const uint8_t byteRecebido = static_cast<uint8_t>(leitura);
+    ++bytesUARTDesdeDiagnostico;
     bufferUART[bytesNoBufferUART++] = byteRecebido;
 
     while (bytesNoBufferUART > 0) {
@@ -245,6 +321,53 @@ void processarUART() {
         memmove(bufferUART, bufferUART + 1, --bytesNoBufferUART);
       }
     }
+  }
+}
+
+void imprimirDiagnosticoUART() {
+  const uint32_t agoraMs = millis();
+  if ((uint32_t)(agoraMs - ultimoDiagnosticoUARTMs) <
+      INTERVALO_DIAGNOSTICO_UART_MS) {
+    return;
+  }
+  ultimoDiagnosticoUARTMs = agoraMs;
+
+  Serial.printf(
+      "UART1/s: %lu bytes, IR=%lu, BNO=%lu, ultra=%lu, invalidos=%lu, pendentes=%u",
+      static_cast<unsigned long>(bytesUARTDesdeDiagnostico),
+      static_cast<unsigned long>(pacotesIRDesdeDiagnostico),
+      static_cast<unsigned long>(pacotesBNODesteDiagnostico),
+      static_cast<unsigned long>(pacotesUltraDesdeDiagnostico),
+      static_cast<unsigned long>(quadrosInvalidosDesdeDiagnostico),
+      static_cast<unsigned>(bytesNoBufferUART));
+  if (ultimoErroUART != nullptr) {
+    Serial.printf(" | ultimo erro: %s", ultimoErroUART);
+  }
+  Serial.println();
+
+  bytesUARTDesdeDiagnostico = 0;
+  pacotesIRDesdeDiagnostico = 0;
+  pacotesBNODesteDiagnostico = 0;
+  pacotesUltraDesdeDiagnostico = 0;
+  quadrosInvalidosDesdeDiagnostico = 0;
+  ultimoErroUART = nullptr;
+}
+
+void informarBloqueioMovimento(const char *motivo) {
+  const uint32_t agoraMs = millis();
+  if (ultimoBloqueioMovimento == nullptr ||
+      strcmp(ultimoBloqueioMovimento, motivo) != 0 ||
+      (uint32_t)(agoraMs - ultimaMensagemBloqueioMs) >= 1000) {
+    Serial.printf("MOVIMENTO BLOQUEADO: %s\n", motivo);
+    ultimoBloqueioMovimento = motivo;
+    ultimaMensagemBloqueioMs = agoraMs;
+  }
+}
+
+void informarMovimentoLiberado() {
+  if (ultimoBloqueioMovimento != nullptr) {
+    Serial.println("MOVIMENTO LIBERADO.");
+    ultimoBloqueioMovimento = nullptr;
   }
 }
 
@@ -285,6 +408,97 @@ bool obterQuadroUltra(UltraDataPacket &destino, uint32_t &recebidoEmMs) {
   }
   portEXIT_CRITICAL(&travaQuadro);
   return disponivel;
+}
+
+void selecionarCanalLDR(uint8_t canal) {
+  digitalWrite(LDR_MUX_S0, canal & 0x01);
+  digitalWrite(LDR_MUX_S1, (canal >> 1) & 0x01);
+  digitalWrite(LDR_MUX_S2, (canal >> 2) & 0x01);
+  digitalWrite(LDR_MUX_S3, (canal >> 3) & 0x01);
+  delayMicroseconds(10);
+}
+
+uint16_t lerSensorLDR(uint8_t canal) {
+  selecionarCanalLDR(canal);
+  for (uint8_t i = 0; i < LDR_DISCARD_COUNT; ++i) analogRead(LDR_MUX_SIG);
+
+  uint32_t total = 0;
+  for (uint8_t i = 0; i < LDR_SAMPLE_COUNT; ++i) {
+    total += analogRead(LDR_MUX_SIG);
+    delayMicroseconds(100);
+  }
+  return total / LDR_SAMPLE_COUNT;
+}
+
+void capturarReferenciaLDR(uint16_t referencia[LDR_SENSOR_COUNT]) {
+  for (uint8_t sensor = 0; sensor < LDR_SENSOR_COUNT; ++sensor) {
+    uint32_t total = 0;
+    for (uint8_t amostra = 0; amostra < LDR_CALIBRATION_SAMPLES; ++amostra) {
+      total += lerSensorLDR(sensor);
+      delay(2);
+    }
+    referencia[sensor] = total / LDR_CALIBRATION_SAMPLES;
+  }
+}
+
+void prepararClassificacaoLDR() {
+  for (uint8_t sensor = 0; sensor < LDR_SENSOR_COUNT; ++sensor) {
+    limiarLDR[sensor] =
+        (referenciaBrancaLDR[sensor] + referenciaVerdeLDR[sensor]) / 2;
+    sensorBrancoLDR[sensor] =
+        referenciaBrancaLDR[sensor] >= referenciaVerdeLDR[sensor];
+  }
+
+  for (uint8_t regiao = 0; regiao < LDR_REGION_COUNT; ++regiao) {
+    uint32_t totalBranco = 0;
+    uint32_t totalVerde = 0;
+    uint32_t totalLimiar = 0;
+    for (uint8_t i = 0; i < CONTAGENS_REGIOES_LDR[regiao]; ++i) {
+      const uint8_t canal = CANAIS_REGIOES_LDR[regiao][i];
+      totalBranco += referenciaBrancaLDR[canal];
+      totalVerde += referenciaVerdeLDR[canal];
+      totalLimiar += limiarLDR[canal];
+    }
+
+    const uint8_t quantidade = CONTAGENS_REGIOES_LDR[regiao];
+    referenciaBrancaRegiaoLDR[regiao] = totalBranco / quantidade;
+    referenciaVerdeRegiaoLDR[regiao] = totalVerde / quantidade;
+    limiarRegiaoLDR[regiao] = totalLimiar / quantidade;
+    brancoAcimaLDR[regiao] =
+        referenciaBrancaRegiaoLDR[regiao] >= referenciaVerdeRegiaoLDR[regiao];
+    regiaoBrancaLDR[regiao] = brancoAcimaLDR[regiao];
+  }
+}
+
+bool processarComandosLDR() {
+  bool comandoExecutado = false;
+  while (Serial.available() > 0) {
+    const char comando = Serial.read();
+    if (comando == 'w' || comando == 'W') {
+      comandoExecutado = true;
+      motores.parar();
+      Serial.println("Capturando referencia branca; mantenha os LDRs sobre branco.");
+      capturarReferenciaLDR(referenciaBrancaLDR);
+      referenciaBrancaCapturadaLDR = true;
+      if (referenciaVerdeCapturadaLDR) prepararClassificacaoLDR();
+      Serial.println("Referencia branca LDR capturada.");
+    } else if (comando == 'g' || comando == 'G') {
+      comandoExecutado = true;
+      motores.parar();
+      Serial.println("Capturando referencia verde; mantenha os LDRs sobre verde.");
+      capturarReferenciaLDR(referenciaVerdeLDR);
+      referenciaVerdeCapturadaLDR = true;
+      if (referenciaBrancaCapturadaLDR) prepararClassificacaoLDR();
+      Serial.println("Referencia verde LDR capturada.");
+    } else if (comando == 'r' || comando == 'R') {
+      comandoExecutado = true;
+      motores.parar();
+      referenciaBrancaCapturadaLDR = false;
+      referenciaVerdeCapturadaLDR = false;
+      Serial.println("Calibracao LDR reiniciada; motores permanecem parados.");
+    }
+  }
+  return comandoExecutado;
 }
 
 float erroAngular(float desejado, float atual) {
@@ -330,14 +544,38 @@ void imprimirDadosIR(const IRActivityPacket &pacote) {
   }
 }
 
-void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao) {
+void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao,
+                      bool imprimirDiagnostico) {
   if (!bolaDetectada) {
+    informarBloqueioMovimento(
+        "Head nao detecta bola (atividade abaixo do limiar de confianca).");
     motores.parar();
     return;
   }
-  const float angulo = anguloGraus * DEG_TO_RAD;
-  const float x = VELOCIDADE_SEGUIR * sinf(angulo);
-  const float y = VELOCIDADE_SEGUIR * cosf(angulo);
+
+  float x = 0.0f;
+  float y = 0.0f;
+  const char *movimento;
+  if (anguloGraus >= -45.0f && anguloGraus <= 45.0f) {
+    y = VELOCIDADE_CORRECAO_LINHA;
+    movimento = "para frente";
+  } else if (anguloGraus < -45.0f && anguloGraus >= -135.0f) {
+    x = -VELOCIDADE_CORRECAO_LINHA;
+    movimento = "para direita";
+  } else if (anguloGraus > 45.0f && anguloGraus <= 135.0f) {
+    x = VELOCIDADE_CORRECAO_LINHA;
+    movimento = "para esquerda";
+  } else {
+    y = -VELOCIDADE_CORRECAO_LINHA;
+    movimento = "para tras";
+  }
+
+  if (imprimirDiagnostico) {
+    Serial.printf("Perseguindo bola por IR: %s | rumo=%.1f graus | rotacao=%.3f\n",
+                  movimento, ultimoPacoteBNO.headingDegrees, rotacao);
+  }
+
+  informarMovimentoLiberado();
   aplicarRodas(x, y, rotacao);
 }
 
@@ -345,42 +583,61 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao) {
 
 void setup() {
   neopixelWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
-  Serial.begin(115200);
+  Serial.begin(USB_SERIAL_BAUD);
+  const size_t tamanhoBufferUARTConfigurado =
+      Serial1.setRxBufferSize(TAMANHO_BUFFER_RX_UART);
+  Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   pidCorrecaoRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
   ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
+  if (USAR_LDR) {
+    pinMode(LDR_MUX_SIG, INPUT);
+    pinMode(LDR_MUX_S0, OUTPUT);
+    pinMode(LDR_MUX_S1, OUTPUT);
+    pinMode(LDR_MUX_S2, OUTPUT);
+    pinMode(LDR_MUX_S3, OUTPUT);
+    analogReadResolution(12);
+    analogSetPinAttenuation(LDR_MUX_SIG, ADC_11db);
+  }
   IHM_begin();
 
-  Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  Serial.println("Body UART1: 115200 baud, 8N1, RX=18 TX=17.");
+  if (tamanhoBufferUARTConfigurado < TAMANHO_BUFFER_RX_UART) {
+    Serial.printf("ERRO: buffer RX UART1 configurado com %u de %u bytes.\n",
+                  static_cast<unsigned>(tamanhoBufferUARTConfigurado),
+                  static_cast<unsigned>(TAMANHO_BUFFER_RX_UART));
+  }
+  Serial.println("LED verde requer pacotes IR e BNO validos e recentes.");
+  Serial.println(USAR_LDR
+      ? "LDR habilitado: calibra com 'w' (branco) e 'g' (verde)."
+      : "LDR desativado; movimento controlado somente por IR e BNO.");
 }
 
 void loop() {
   processarUART();
   atualizarLedUART();
+  imprimirDiagnosticoUART();
   IHM_update();
+  if (USAR_LDR && processarComandosLDR()) {
+    motores.parar();
+    return;
+  }
 
   BNODataPacket pacoteBNO{};
   uint32_t recebidoBNOEmMs = 0;
   if (obterQuadroBNO(pacoteBNO, recebidoBNOEmMs)) {
     if (!sequenciaBNOIniciada ||
         (int16_t)(pacoteBNO.sequence - ultimaSequenciaBNO) > 0) {
-      if (!isfinite(pacoteBNO.headingDegrees) ||
-          !isfinite(pacoteBNO.gyroZDegreesPerSecond) ||
-          pacoteBNO.headingDegrees < -180.0f ||
-          pacoteBNO.headingDegrees >= 180.0f) {
-        registrarFalhaUART("heading ou gyro invalido no quadro BNO055");
-      } else {
-        ultimaSequenciaBNO = pacoteBNO.sequence;
-        sequenciaBNOIniciada = true;
-        ultimoPacoteBNO = pacoteBNO;
-        if (!referenciaRumoDefinida) {
-          rumoDesejadoGraus = pacoteBNO.headingDegrees;
-          referenciaRumoDefinida = true;
-        }
-        pacoteBNOInicialRecebido = true;
-        ultimoRecebimentoBNOMs = recebidoBNOEmMs;
+      ultimaSequenciaBNO = pacoteBNO.sequence;
+      sequenciaBNOIniciada = true;
+      ultimoPacoteBNO = pacoteBNO;
+      if (!referenciaRumoDefinida) {
+        rumoDesejadoGraus = pacoteBNO.headingDegrees;
       }
+      referenciaRumoDefinida = true;
+      pacoteBNOInicialRecebido = true;
+      ultimoRecebimentoBNOMs = recebidoBNOEmMs;
     }
   }
 
@@ -429,24 +686,32 @@ void loop() {
       ultimoPacoteUltra.validMask, ultraTelemetriaValida,
       ultimaAtividadeIR, irTelemetriaValida);
 
-  if (!pacoteInicialRecebido ||
-      (uint32_t)(agora - ultimoRecebimentoMs) > TIMEOUT_PACOTE_MS ||
-      !bnoTelemetriaValida || !referenciaRumoDefinida) {
-    // Sem dados IR/BNO recentes, interrompe o movimento por seguranca.
+  if (quadroNovo) {
+    imprimirDadosIR(ultimoPacote);
+  }
+
+  if (!pacoteInicialRecebido) {
+    informarBloqueioMovimento("aguardando primeiro pacote IR valido.");
+    motores.parar();
+    return;
+  }
+  if ((uint32_t)(agora - ultimoRecebimentoMs) > TIMEOUT_PACOTE_MS) {
+    informarBloqueioMovimento("pacotes IR expiraram.");
+    motores.parar();
+    return;
+  }
+  if (!bnoTelemetriaValida || !referenciaRumoDefinida) {
+    informarBloqueioMovimento("aguardando telemetria BNO valida e recente.");
     motores.parar();
     return;
   }
 
   if (quadroNovo) {
-    imprimirDadosIR(ultimoPacote);
-  }
-
-  if (quadroNovo) {
-    const float correcaoRumo = calcularCorrecaoRumo(
+    ultimaCorrecaoRumo = calcularCorrecaoRumo(
         ultimaBolaDetectada,
         ultimoPacoteBNO.headingDegrees,
         ultimoPacoteBNO.gyroZDegreesPerSecond);
-    decidirMovimento(ultimaBolaDetectada, ultimaDirecaoBola, correcaoRumo);
   }
-
+  decidirMovimento(ultimaBolaDetectada, ultimaDirecaoBola, ultimaCorrecaoRumo,
+                   quadroNovo);
 }

@@ -11,15 +11,15 @@ constexpr int UART_TX_PIN = 17;
 constexpr uint32_t TIMEOUT_EMISSOR_MS = 300;
 constexpr uint32_t INTERVALO_TELEMETRIA_MS = 100;
 
-constexpr float KP_INICIAL = 0.0015f;
-constexpr float KI_INICIAL = 0.00002f;
-constexpr float KD_INICIAL = 0.0020f;
+constexpr float KP_INICIAL = 0.0056f;
+constexpr float KI_INICIAL = 0.0000030f;
+constexpr float KD_INICIAL = 0.00070f;
 constexpr float LIMITE_INTEGRAL = 300.0f;
 constexpr float ZONA_MORTA_GRAUS = 2.0f;
-constexpr float ROTACAO_MAXIMA = 1.0f;
+constexpr float ROTACAO_MAXIMA = 0.850f;
 constexpr float PASSO_ROTACAO = 0.006f;
-constexpr float PASSO_KP = 0.0001f;
-constexpr float PASSO_KI = 0.00001f;
+constexpr float PASSO_KP = 0.0002f;
+constexpr float PASSO_KI = 0.0000005f;
 constexpr float PASSO_KD = 0.0001f;
 constexpr size_t TAMANHO_LINHA = 16;
 
@@ -41,8 +41,6 @@ uint32_t ultimaLeituraUs = 0;
 uint32_t ultimaTelemetriaMs = 0;
 bool linhaMuitoLonga = false;
 bool headingDisponivel = false;
-bool controleAtivo = true;
-float sentidoCorrecao = 1.0f;
 
 float erroAngular(float desejado, float atual) {
   float erro = desejado - atual;
@@ -57,24 +55,22 @@ void pararMovimento() {
 }
 
 void imprimirGanhos() {
-  Serial.printf("Kp=%.4f Ki=%.5f Kd=%.4f\n", kpRumo, kiRumo, kdRumo);
+  Serial.printf("Kp=%.4f Ki=%.7f Kd=%.4f\n", kpRumo, kiRumo, kdRumo);
 }
 
 void ajustarGanhos(char comando) {
   switch (comando) {
     case 'q':
     case 'Q':
-    case '+':
-      kpRumo = fminf(kpRumo + PASSO_KP, 0.020f);
+      kpRumo = fminf(kpRumo + PASSO_KP, 0.150f);
       break;
     case 'a':
     case 'A':
-    case '-':
       kpRumo = fmaxf(kpRumo - PASSO_KP, 0.0f);
       break;
     case 'w':
     case 'W':
-      kiRumo = fminf(kiRumo + PASSO_KI, 0.001f);
+      kiRumo = fminf(kiRumo + PASSO_KI, 0.0001f);
       break;
     case 's':
     case 'S':
@@ -82,12 +78,10 @@ void ajustarGanhos(char comando) {
       break;
     case 'e':
     case 'E':
-    case ']':
-      kdRumo = fminf(kdRumo + PASSO_KD, 0.010f);
+      kdRumo = fminf(kdRumo + PASSO_KD, 0.004f);
       break;
     case 'd':
     case 'D':
-    case '[':
       kdRumo = fmaxf(kdRumo - PASSO_KD, 0.0f);
       break;
     default:
@@ -104,19 +98,6 @@ void processarSerial() {
     if (comando == '\r' || comando == '\n') continue;
 
     ajustarGanhos(comando);
-    if (comando == 'p' || comando == 'P') {
-      controleAtivo = !controleAtivo;
-      pidRumo.reset();
-      pararMovimento();
-      Serial.println(controleAtivo
-                         ? "Correcao retomada."
-                         : "Correcao pausada; motores parados.");
-    } else if (comando == 'r' || comando == 'R') {
-      pararMovimento();
-      pidRumo.reset();
-      sentidoCorrecao = -sentidoCorrecao;
-      Serial.printf("Sentido de rotacao: %+.0f\n", sentidoCorrecao);
-    }
   }
 }
 
@@ -154,9 +135,7 @@ void processarLinhaHeading() {
   float erro = erroAngular(0.0f, heading);
   if (fabsf(erro) <= ZONA_MORTA_GRAUS) erro = 0.0f;
 
-  float alvo = controleAtivo
-      ? sentidoCorrecao * pidRumo.calculate(erro, gyroEstimado, dt)
-      : 0.0f;
+  float alvo = pidRumo.calculate(erro, gyroEstimado, dt);
   alvo = constrain(alvo, -ROTACAO_MAXIMA, ROTACAO_MAXIMA);
   correcaoAtual += constrain(alvo - correcaoAtual,
                              -PASSO_ROTACAO, PASSO_ROTACAO);
@@ -168,8 +147,9 @@ void processarLinhaHeading() {
   if ((uint32_t)(agoraMs - ultimaTelemetriaMs) >=
       INTERVALO_TELEMETRIA_MS) {
     ultimaTelemetriaMs = agoraMs;
-    Serial.printf("rumo=%.2f erro=%.2f rot=%.3f Kp=%.4f Ki=%.5f Kd=%.4f rodas=%.3f,%.3f,%.3f,%.3f\n",
-                  heading, erro, correcaoAtual, kpRumo, kiRumo, kdRumo,
+    Serial.printf("rumo=%.2f erro=%.2f gyro=%.1f rot=%.3f Kp=%.4f Ki=%.7f Kd=%.4f rodas=%.3f,%.3f,%.3f,%.3f\n",
+                  heading, erro, gyroEstimado, correcaoAtual, kpRumo, kiRumo,
+                  kdRumo,
                   rodas.m1, rodas.m2, rodas.m3, rodas.m4);
   }
 }
@@ -200,15 +180,15 @@ void processarUART() {
 } // namespace
 
 void setup() {
-  Serial.begin(115200);
-  Serial1.begin(115200, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  Serial.begin(460800);
+  Serial1.begin(460800, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   pidRumo.setIntegralLimit(LIMITE_INTEGRAL);
   motores.begin();
   motores.parar();
 
   Serial.println("=== Receptor UART: PID de rumo e motores ===");
   Serial.println("Recebe somente o angulo do emissor; alvo inicial = 0 graus.");
-  Serial.println("Serial: q/a Kp, w/s Ki, e/d Kd; +/- Kp, [/] Kd; p pausa.");
+  Serial.println("Serial: q/a Kp, w/s Ki, e/d Kd.");
   imprimirGanhos();
 }
 

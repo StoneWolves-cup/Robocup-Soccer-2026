@@ -11,8 +11,8 @@ uint32_t ultimoEnvioMs = 0;
 }
 
 void setup() {
-  Serial.begin(115200);
-  Serial1.begin(115200, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  Serial.begin(460800);
+  Serial1.begin(460800, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
 
   Serial.println("=== Emissor de angulo BNO055 ===");
   if (!sensorBNO.begin()) {
