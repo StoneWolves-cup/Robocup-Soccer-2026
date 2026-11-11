@@ -123,6 +123,18 @@ para a bateria utilizada.</p>
 <pre><code>pio run -e bateria-test -t upload
 pio device monitor -e bateria-test</code></pre>
 
+<h3>Teste regional dos LDRs</h3>
+<p>O teste usa 15 LDRs conectados aos canais C0-C14 de um CD4067BM no ESP32-S3.
+Ligue SIG ao GPIO14 e S0-S3 aos GPIOs 10-13, respectivamente; o canal C15 fica
+sem uso. As regiões são Centro (C0-C7 e C14), Esquerda (C12-C13), Direita
+(C8-C9) e Inferior (C10-C11). Os LEDs brancos acendem automaticamente e não
+precisam de controle pelo firmware. Calibre sobre branco com <code>w</code> e
+depois sobre verde com <code>g</code>; <code>r</code> reinicia a calibração.
+Cada LDR recebe seu limiar a partir das duas referências, e o teste compara a
+média de leitura de cada região com a média dos limiares daquela região.</p>
+<pre><code>pio run -e ldr-test -t upload
+pio device monitor -e ldr-test</code></pre>
+
 <h3>Teste do angulo da bola via UART</h3>
 <p>O emissor lê os 16 sensores TSSP, calcula a direção da bola e envia o pacote
 IR pela UART1. O receptor é um firmware separado que apenas imprime os dados
@@ -138,6 +150,20 @@ pacote IR válido, e informa quando a comunicação voltar.</p>
 <pre><code>pio run -e uart-ir-emissor-test -t upload
 pio run -e uart-ir-receptor-test -t upload
 pio device monitor -e uart-ir-receptor-test</code></pre>
+
+<h3>Teste de correção de rumo via UART</h3>
+<p>O emissor <code>uart-bno-emissor-test</code> lê o BNO055 e envia somente o
+ângulo, em graus, como um número por linha. Ele define o rumo inicial como
+zero; envie <code>c</code> no monitor serial do emissor para redefinir essa
+referência. O receptor <code>bno-move-test</code> calcula o PID, gira os motores
+para corrigir o rumo e para os motores se perder os dados UART por mais de
+300 ms. Ligue TX GPIO17 de cada placa ao RX GPIO18 da outra e una os GNDs.
+No monitor serial do receptor, use <code>q/a</code> para aumentar/diminuir Kp,
+<code>w/s</code> para Ki, <code>e/d</code> para Kd, <code>p</code> para pausar
+ou retomar e <code>r</code> para inverter o sentido de correção.</p>
+<pre><code>pio run -e uart-bno-emissor-test -t upload
+pio run -e bno-move-test -t upload
+pio device monitor -e bno-move-test</code></pre>
 
 <hr>
 

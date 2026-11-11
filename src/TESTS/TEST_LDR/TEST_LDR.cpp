@@ -1,25 +1,43 @@
 #include <Arduino.h>
 
-// Teste para 16 LDRs ligados aos canais C0..C15 de um CD74HC4067.
-// A placa deve manter os LEDs IR ligados durante todas as leituras.
-// Confirme os pinos abaixo com a fiação real antes de energizar.
-constexpr uint8_t SENSOR_COUNT = 16;
-constexpr uint8_t MUX_SIG = 15; // ADC1 no ESP32 DevKit V1 (GPIO4, somente entrada)
-constexpr uint8_t MUX_S0 = 18;
-constexpr uint8_t MUX_S1 = 5;
-constexpr uint8_t MUX_S2 = 4;
-constexpr uint8_t MUX_S3 = 2;
+constexpr uint8_t SENSOR_COUNT = 15;
+constexpr uint8_t REGION_COUNT = 4;
+constexpr uint8_t MUX_SIG = 14;
+constexpr uint8_t MUX_S0 = 10;
+constexpr uint8_t MUX_S1 = 11;
+constexpr uint8_t MUX_S2 = 12;
+constexpr uint8_t MUX_S3 = 13;
 constexpr uint8_t SAMPLE_COUNT = 12;
 constexpr uint8_t ADC_DISCARD_COUNT = 2;
 constexpr uint16_t CALIBRATION_SAMPLES = 8;
 constexpr uint16_t HYSTERESIS_DIVISOR = 8;
 
+const char *const REGION_NAMES[REGION_COUNT] = {
+    "Centro", "Esquerda", "Direita", "Inferior"};
+
+const uint8_t REGION_CHANNELS[REGION_COUNT][9] = {
+    {0, 1, 2, 3, 4, 5, 6, 7, 14},
+    {12, 13},
+    {8, 9},
+    {10, 11}};
+
+const uint8_t REGION_SENSOR_COUNTS[REGION_COUNT] = {9, 2, 2, 2};
+
 uint16_t whiteReference[SENSOR_COUNT] = {};
 uint16_t greenReference[SENSOR_COUNT] = {};
 uint16_t threshold[SENSOR_COUNT] = {};
+uint16_t regionWhiteReference[REGION_COUNT] = {};
+uint16_t regionGreenReference[REGION_COUNT] = {};
+uint16_t regionThreshold[REGION_COUNT] = {};
 bool whiteCaptured = false;
 bool greenCaptured = false;
-bool sensorIsWhite[SENSOR_COUNT] = {};
+bool regionWhiteIsHigher[REGION_COUNT] = {};
+bool regionIsWhite[REGION_COUNT] = {};
+
+uint16_t absoluteDifference(uint16_t first, uint16_t second)
+{
+    return first >= second ? first - second : second - first;
+}
 
 void selectMuxChannel(uint8_t channel)
 {
@@ -64,64 +82,95 @@ void captureReference(uint16_t reference[SENSOR_COUNT])
 void prepareClassification()
 {
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
-    {
         threshold[i] = (whiteReference[i] + greenReference[i]) / 2;
-        sensorIsWhite[i] = whiteReference[i] >= greenReference[i];
+
+    for (uint8_t region = 0; region < REGION_COUNT; ++region)
+    {
+        uint32_t whiteTotal = 0;
+        uint32_t greenTotal = 0;
+        uint32_t thresholdTotal = 0;
+
+        for (uint8_t i = 0; i < REGION_SENSOR_COUNTS[region]; ++i)
+        {
+            const uint8_t channel = REGION_CHANNELS[region][i];
+            whiteTotal += whiteReference[channel];
+            greenTotal += greenReference[channel];
+            thresholdTotal += threshold[channel];
+        }
+
+        const uint8_t count = REGION_SENSOR_COUNTS[region];
+        regionWhiteReference[region] = whiteTotal / count;
+        regionGreenReference[region] = greenTotal / count;
+        regionThreshold[region] = thresholdTotal / count;
+        regionWhiteIsHigher[region] =
+            regionWhiteReference[region] >= regionGreenReference[region];
+        regionIsWhite[region] = regionWhiteIsHigher[region];
     }
 }
 
-bool isWhite(uint8_t sensor, uint16_t value)
+bool isRegionWhite(uint8_t region, uint16_t value)
 {
-    const bool whiteHigher = whiteReference[sensor] >= greenReference[sensor];
-    const uint16_t difference = abs((int)whiteReference[sensor] - (int)greenReference[sensor]);
+    const uint16_t difference =
+        absoluteDifference(regionWhiteReference[region], regionGreenReference[region]);
     const uint16_t margin = difference / HYSTERESIS_DIVISOR;
+    const uint16_t threshold = regionThreshold[region];
 
-    if (whiteHigher)
+    if (regionWhiteIsHigher[region])
     {
-        if ((uint32_t)value > (uint32_t)threshold[sensor] + margin) sensorIsWhite[sensor] = true;
-        else if ((uint32_t)value + margin < threshold[sensor]) sensorIsWhite[sensor] = false;
+        if ((uint32_t)value > (uint32_t)threshold + margin)
+            regionIsWhite[region] = true;
+        else if ((uint32_t)value + margin < threshold)
+            regionIsWhite[region] = false;
     }
     else
     {
-        if ((uint32_t)value + margin < threshold[sensor]) sensorIsWhite[sensor] = true;
-        else if ((uint32_t)value > (uint32_t)threshold[sensor] + margin) sensorIsWhite[sensor] = false;
+        if ((uint32_t)value + margin < threshold)
+            regionIsWhite[region] = true;
+        else if ((uint32_t)value > (uint32_t)threshold + margin)
+            regionIsWhite[region] = false;
     }
-    return sensorIsWhite[sensor];
+    return regionIsWhite[region];
 }
 
 void printReadings()
 {
-    uint16_t activeCount = 0;
-    int32_t weightedPosition = 0;
+    uint16_t readings[SENSOR_COUNT];
 
-    Serial.print("C0-C15: ");
+    Serial.print("C0-C14: ");
     for (uint8_t i = 0; i < SENSOR_COUNT; ++i)
     {
-        const uint16_t value = readSensor(i);
-        Serial.print(value);
-        if (whiteCaptured && greenCaptured && isWhite(i, value))
-        {
-            Serial.print("*");
-            ++activeCount;
-            weightedPosition += (int32_t)i * 1000;
-        }
-        if (i + 1 < SENSOR_COUNT) Serial.print(" | ");
+        readings[i] = readSensor(i);
+        Serial.print(readings[i]);
+        if (i + 1 < SENSOR_COUNT)
+            Serial.print(" | ");
     }
 
-    Serial.print(" || linha branca: ");
+    Serial.print(" || Regioes: ");
     if (!(whiteCaptured && greenCaptured))
     {
-        Serial.println("calibre com w e g");
-    }
-    else if (activeCount == 0)
-    {
-        Serial.println("nao detectada");
+        Serial.println("calibre branco (w) e verde (g)");
     }
     else
     {
-        Serial.print(activeCount);
-        Serial.print(" sensores | centro (indice x1000): ");
-        Serial.println(weightedPosition / activeCount);
+        for (uint8_t region = 0; region < REGION_COUNT; ++region)
+        {
+            uint32_t total = 0;
+            for (uint8_t i = 0; i < REGION_SENSOR_COUNTS[region]; ++i)
+                total += readings[REGION_CHANNELS[region][i]];
+
+            const uint16_t average = total / REGION_SENSOR_COUNTS[region];
+            Serial.print(REGION_NAMES[region]);
+            Serial.print(": ");
+            Serial.print(isRegionWhite(region, average) ? "BRANCO" : "VERDE");
+            Serial.print(" (media ");
+            Serial.print(average);
+            Serial.print(", limiar ");
+            Serial.print(regionThreshold[region]);
+            Serial.print(")");
+            if (region + 1 < REGION_COUNT)
+                Serial.print(" | ");
+        }
+        Serial.println();
     }
 }
 
@@ -137,9 +186,11 @@ void setup()
     analogReadResolution(12);
     analogSetPinAttenuation(MUX_SIG, ADC_11db);
 
-    Serial.println("Teste de linha branca - 16 LDRs / CD74HC4067");
+    Serial.println("Teste regional - 15 LDRs / CD4067BM / ESP32-S3");
+    Serial.println("MUX: SIG=14, S0=10, S1=11, S2=12, S3=13; C15 sem uso");
+    Serial.println("Regioes: Centro C0-C7/C14, Esquerda C12-C13, Direita C8-C9, Inferior C10-C11");
     Serial.println("Comandos: w = calibrar branco | g = calibrar verde | r = reiniciar");
-    Serial.println("Mantenha a placa na mesma altura e com LEDs IR ligados ao calibrar.");
+    Serial.println("Mantenha a placa na mesma altura durante as duas calibracoes.");
 }
 
 void loop()
