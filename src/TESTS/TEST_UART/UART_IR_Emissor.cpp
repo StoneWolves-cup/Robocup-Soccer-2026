@@ -10,7 +10,7 @@ constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
-constexpr uint32_t UART_BAUD = 115200;
+constexpr uint32_t UART_BAUD = 460800;
 constexpr int UART_RX_PIN = 18;
 constexpr int UART_TX_PIN = 17;
 

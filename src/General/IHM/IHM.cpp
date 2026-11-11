@@ -57,7 +57,8 @@ enum Tela {
   TELA_LDR,
 
   TELA_TESTE_BNO,
-  TELA_TESTE_ULTRA
+  TELA_TESTE_ULTRA,
+  TELA_INFO_TESTE
 };
 
 Tela tela = TELA_MENU;
@@ -113,18 +114,21 @@ const int totalBNO = 3;
 // =====================================================
 
 int opcaoChecklist = 0;
-const int totalChecklist = 2;
+const int totalChecklist = 7;
+const int itensChecklistVisiveis = 4;
 
-// 0 = BNO
-// 1 = ULTRA
+// BNO, IR, ultrassonicos, motores, solenoides, UART e LDR.
+const char *const NOMES_CHECKLIST[totalChecklist] = {
+    "BNO", "IR / TSSP", "ULTRASSONICOS", "MOTORES",
+    "SOLENOIDES", "UART", "LDR"};
 
 // =====================================================
 // ESTADOS DOS BOTOES
 // =====================================================
 
-bool estadoAnteriorSelecionar = HIGH;
-bool estadoAnteriorMexer = HIGH;
-bool estadoAnteriorVoltar = HIGH;
+bool estadoAnteriorSelecionar = LOW;
+bool estadoAnteriorMexer = LOW;
+bool estadoAnteriorVoltar = LOW;
 
 // =====================================================
 // DEBOUNCE
@@ -143,13 +147,13 @@ const unsigned long DEBOUNCE = 150;
 // depois que a leitura ficar estavel por alguns ms.
 // Assim, um toque gera apenas um clique.
 
-bool leituraBrutaSelecionar = HIGH;
-bool leituraBrutaMexer = HIGH;
-bool leituraBrutaVoltar = HIGH;
+bool leituraBrutaSelecionar = LOW;
+bool leituraBrutaMexer = LOW;
+bool leituraBrutaVoltar = LOW;
 
-bool estadoEstavelSelecionar = HIGH;
-bool estadoEstavelMexer = HIGH;
-bool estadoEstavelVoltar = HIGH;
+bool estadoEstavelSelecionar = LOW;
+bool estadoEstavelMexer = LOW;
+bool estadoEstavelVoltar = LOW;
 
 unsigned long ultimaMudancaBrutaSelecionar = 0;
 unsigned long ultimaMudancaBrutaMexer = 0;
@@ -620,40 +624,24 @@ void mostrarMenuChecklist() {
     112
   );
 
-  const char* nomes[] = {
-    "BNO",
-    "ULTRA"
-  };
+  int primeiroItem = opcaoChecklist - itensChecklistVisiveis + 1;
+  if (primeiroItem < 0) primeiroItem = 0;
+  if (primeiroItem > totalChecklist - itensChecklistVisiveis) {
+    primeiroItem = totalChecklist - itensChecklistVisiveis;
+  }
 
-  for (int i = 0; i < totalChecklist; i++) {
-
-    int y = 31 + i * 13;
-
-    if (i == opcaoChecklist) {
-
-      oled.drawStr(
-        8,
-        y,
-        ">"
-      );
-    }
-
-    oled.drawStr(
-      20,
-      y,
-      nomes[i]
-    );
+  for (int linha = 0; linha < itensChecklistVisiveis; ++linha) {
+    const int indice = primeiroItem + linha;
+    const int y = 24 + linha * 9;
+    if (indice == opcaoChecklist) oled.drawStr(4, y, ">");
+    oled.drawStr(14, y, NOMES_CHECKLIST[indice]);
   }
 
   oled.setFont(
     u8g2_font_5x8_tr
   );
 
-  oled.drawStr(
-    4,
-    62,
-    "MEXER=TROCA  SEL=TESTE"
-  );
+  oled.drawStr(4, 62, "MEXER=PROX SEL=ABRIR");
 
   oled.sendBuffer();
 }
@@ -807,7 +795,7 @@ void testarBNONaTela() {
     oled.drawStr(
       5,
       52,
-      "DADOS: OK"
+      "PIO: bno-test"
     );
 
     oled.setFont(
@@ -832,15 +820,7 @@ void testarBNONaTela() {
       "SEM DADOS DO HEAD"
     );
 
-    oled.setFont(
-      u8g2_font_ncenB10_tr
-    );
-
-    oled.drawStr(
-      48,
-      49,
-      "ERRO!"
-    );
+    oled.drawStr(5, 43, "PIO: bno-test");
   }
 
   oled.setFont(
@@ -983,7 +963,7 @@ void testarUltraNaTela() {
     oled.drawStr(
       5,
       53,
-      "DADOS: OK"
+      "PIO: ultrassonicos-test"
     );
 
     oled.setFont(
@@ -1010,15 +990,7 @@ void testarUltraNaTela() {
       "AGUARDANDO LEITURA"
     );
 
-    oled.setFont(
-      u8g2_font_ncenB10_tr
-    );
-
-    oled.drawStr(
-      48,
-      58,
-      "ERRO!"
-    );
+    oled.drawStr(5, 53, "PIO: ultrassonicos-test");
   }
 
   if (resultado) {
@@ -1042,6 +1014,57 @@ void testarUltraNaTela() {
     );
   }
 
+  oled.sendBuffer();
+}
+
+void mostrarInfoTesteChecklist() {
+  const char *codigoPrincipal = "";
+  const char *codigoSecundario = "";
+  const char *status = "TESTE SEPARADO";
+
+  switch (opcaoChecklist) {
+    case 1:
+      codigoPrincipal = "tssp-16-test";
+      status = telemetriaIRValida ? "IR UART: DADOS OK" : "IR: SEM DADOS UART";
+      break;
+    case 3:
+      codigoPrincipal = "motores-test";
+      codigoSecundario = "motor-unitario-test";
+      break;
+    case 4:
+      codigoPrincipal = "SEM ENV PIO";
+      codigoSecundario = "TEST_SOLENOIDES/*.ino";
+      break;
+    case 5:
+      codigoPrincipal = "uart-receptor-test";
+      codigoSecundario = "uart-emissor-test";
+      status = (telemetriaBNOValida || telemetriaUltraValida ||
+                telemetriaIRValida)
+                   ? "UART: DADOS OK"
+                   : "UART: SEM DADOS";
+      break;
+    case 6:
+      codigoPrincipal = "ldr-test";
+      codigoSecundario = "w/branco  g/verde";
+      break;
+    default:
+      codigoPrincipal = "TESTE NAO DISPONIVEL";
+      break;
+  }
+
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(30, 9, "CHECKLIST");
+  oled.drawHLine(8, 13, 112);
+  oled.drawStr(4, 25, NOMES_CHECKLIST[opcaoChecklist]);
+
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 36, status);
+  oled.drawStr(4, 47, codigoPrincipal);
+  if (codigoSecundario[0] != '\0') {
+    oled.drawStr(4, 56, codigoSecundario);
+  }
+  oled.drawStr(4, 63, "VOLTAR = CHECKLIST");
   oled.sendBuffer();
 }
 
@@ -1188,9 +1211,9 @@ void mostrarInfra() {
 }
 
 void IHM_begin() {
-  pinMode(BOTAO_SELECIONAR, INPUT_PULLUP);
-  pinMode(BOTAO_MEXER, INPUT_PULLUP);
-  pinMode(BOTAO_VOLTAR, INPUT_PULLUP);
+  pinMode(BOTAO_SELECIONAR, INPUT_PULLDOWN);
+  pinMode(BOTAO_MEXER, INPUT_PULLDOWN);
+  pinMode(BOTAO_VOLTAR, INPUT_PULLDOWN);
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
@@ -1209,11 +1232,11 @@ void IHM_update() {
       BOTAO_VOLTAR, leituraBrutaVoltar, estadoEstavelVoltar,
       ultimaMudancaBrutaVoltar);
   const unsigned long agora = millis();
-  const bool clicouSelecionar = estadoAnteriorSelecionar == HIGH && selecionar == LOW &&
+  const bool clicouSelecionar = estadoAnteriorSelecionar == LOW && selecionar == HIGH &&
                                 agora - ultimoSelecionar > DEBOUNCE;
-  const bool clicouMexer = estadoAnteriorMexer == HIGH && mexer == LOW &&
+  const bool clicouMexer = estadoAnteriorMexer == LOW && mexer == HIGH &&
                            agora - ultimoMexer > DEBOUNCE;
-  const bool clicouVoltar = estadoAnteriorVoltar == HIGH && voltar == LOW &&
+  const bool clicouVoltar = estadoAnteriorVoltar == LOW && voltar == HIGH &&
                             agora - ultimoVoltar > DEBOUNCE;
 
   if (clicouMexer) {
@@ -1233,6 +1256,8 @@ void IHM_update() {
     } else if (tela == TELA_CHECKLIST) {
       opcaoChecklist = (opcaoChecklist + 1) % totalChecklist;
       mostrarMenuChecklist();
+    } else if (tela == TELA_INFO_TESTE) {
+      mostrarInfoTesteChecklist();
     }
   }
 
@@ -1308,8 +1333,14 @@ void IHM_update() {
         zerarBNO();
         break;
       case TELA_CHECKLIST:
-        if (opcaoChecklist == 0) testarBNONaTela();
-        else testarUltraNaTela();
+        if (opcaoChecklist == 0) {
+          testarBNONaTela();
+        } else if (opcaoChecklist == 2) {
+          testarUltraNaTela();
+        } else {
+          tela = TELA_INFO_TESTE;
+          mostrarInfoTesteChecklist();
+        }
         break;
       case TELA_TESTE_BNO:
         testarBNONaTela();
@@ -1341,6 +1372,9 @@ void IHM_update() {
     } else if (tela == TELA_TESTE_BNO || tela == TELA_TESTE_ULTRA) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
+    } else if (tela == TELA_INFO_TESTE) {
+      tela = TELA_CHECKLIST;
+      mostrarMenuChecklist();
     } else {
       tela = TELA_MENU;
       mostrarMenu();
@@ -1353,6 +1387,7 @@ void IHM_update() {
     if (tela == TELA_BNO_LEITURA) mostrarBNO();
     else if (tela == TELA_ULTRA) mostrarUltra();
     else if (tela == TELA_INFRA) mostrarInfra();
+    else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();
   }
 
   estadoAnteriorSelecionar = selecionar;

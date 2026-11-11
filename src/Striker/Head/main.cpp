@@ -10,6 +10,7 @@ constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
 constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 1000;
+constexpr uint32_t USB_SERIAL_BAUD = 460800;
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
@@ -175,7 +176,7 @@ void imprimirDados() {
 } // namespace
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(USB_SERIAL_BAUD);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
 
   iniciarBNO();

@@ -3,7 +3,7 @@
 #include <string.h>
 
 namespace {
-constexpr uint32_t UART_BAUD = 115200;
+constexpr uint32_t UART_BAUD = 460800;
 constexpr int UART_RX_PIN = 18;
 constexpr int UART_TX_PIN = 17;
 constexpr uint32_t TIMEOUT_COMUNICACAO_MS = 1000;

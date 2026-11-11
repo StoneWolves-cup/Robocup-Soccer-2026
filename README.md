@@ -101,17 +101,30 @@ Our objective is to develop autonomous robots capable of playing soccer through 
   <li>ESP32-S3 (UART1 entre Head e Body)</li>
 </ul>
 
-<p>O Head envia os dados dos 16 sensores TSSP ao Body pela UART1 a 115200 baud,
-8N1. Ligue TX GPIO17 do Head a RX GPIO18 do Body e una os GNDs. O Body acende
-o RGB em vermelho enquanto aguarda dados validos e em verde quando a UART esta
-ativa. Conecte o BNO055 ao Head em SDA GPIO8 e SCL GPIO9. O Head envia rumo e
+<p>O Head envia os dados dos 16 sensores TSSP e a telemetria do BNO055 ao Body
+pela UART1 a 115200 baud, 8N1. A UART do Body inicializa antes da IHM. O monitor
+USB dos firmwares Head e Body usa 460800 baud. Ligue TX GPIO17 do Head a RX
+GPIO18 do Body e una os GNDs. O Body acende
+o RGB em vermelho enquanto aguarda dados validos e em verde somente quando
+recebe pacotes IR e BNO validos e recentes. O monitor serial do Body informa
+por segundo a quantidade de bytes e pacotes aceitos por tipo e o ultimo erro
+de protocolo. Conecte o BNO055 ao Head em SDA GPIO8 e SCL GPIO9. O Head envia rumo e
 velocidade angular junto com os dados da bola; o Body segue a direcao detectada
 e corrige a rotacao para manter o rumo inicial. Sem dados recentes do BNO055,
 os motores permanecem parados. As leituras e a direcao da bola aparecem no
 monitor serial do Head; rumo e correcao aparecem no monitor do Body.</p>
-<p>O Body usa PID de rumo (Kp=0.0015, Ki=0.0001, Kd=0.0020), com integral
-limitada para evitar windup. Esses ganhos devem ser ajustados com testes
-controlados no robo.</p>
+<p>Atualmente, a decisao de movimento do Striker usa somente IR e BNO055. Os
+LDRs de linha estao temporariamente desativados: nao e necessario calibrar e
+nao ha protecao contra a linha branca. Com a bola detectada, o Body move na
+direcao indicada pelo IR e corrige a rotacao com o BNO. Sem bola detectada ou
+sem telemetria BNO recente, os motores permanecem parados. O monitor serial
+informa o motivo de bloqueio. Teste os motores com o robo suspenso ou em uma
+bancada segura enquanto os LDRs estiverem desativados.</p>
+<p>O Body usa FuzzyPID para corrigir o rumo com base no erro angular e na
+velocidade do giroscopio. Os ganhos base atuais sao Kp=0.0054, Ki=0.0000030 e
+Kd=0.0007; o ajuste fuzzy adapta esses ganhos durante a operacao. A integral
+e limitada a 300 e a rotacao de correcao a 0.30. Esses valores devem ser
+ajustados com testes controlados no robo.</p>
 
 <h3>Teste de leitura percentual da bateria</h3>
 <p>O teste para ESP32-S3 usa o estimador em <code>include/BatteryEstimator.h</code>
@@ -137,19 +150,30 @@ pio device monitor -e ldr-test</code></pre>
 
 <h3>Teste do angulo da bola via UART</h3>
 <p>O emissor lê os 16 sensores TSSP, calcula a direção da bola e envia o pacote
-IR pela UART1. O receptor é um firmware separado que apenas imprime os dados
+IR pela UART1 a 460800 baud. O receptor é um firmware separado que apenas imprime os dados
 IR recebidos no monitor serial, sem depender do Body. Conecte TX GPIO17 do
 emissor ao RX GPIO18 do receptor e una os GNDs. Grave
 <code>uart-ir-emissor-test</code> no emissor e
 <code>uart-ir-receptor-test</code> no receptor. O monitor serial do receptor
 mostra as atividades dos 16 sensores, a direção e a confiança da detecção a
-115200 baud.
+460800 baud. Configure também o monitor USB dos testes UART para 460800 baud.
 Use no emissor os mesmos GPIOs e conexões da coroa TSSP de 16 sensores. O
 receptor avisa no serial se nenhum byte chegar ou se os bytes não formarem um
 pacote IR válido, e informa quando a comunicação voltar.</p>
 <pre><code>pio run -e uart-ir-emissor-test -t upload
 pio run -e uart-ir-receptor-test -t upload
 pio device monitor -e uart-ir-receptor-test</code></pre>
+
+<h3>Teste padrão de mensagem UART</h3>
+<p>Grave <code>uart-emissor-test</code> e <code>uart-receptor-test</code> em
+duas ESP32-S3. Ligue TX GPIO17 do emissor ao RX GPIO18 do receptor e una os
+GNDs. A UART1 deste teste usa 115200 baud (8N1); o monitor USB permanece em
+460800 baud. O receptor fica vermelho enquanto aguarda e fica verde ao receber
+uma linha completa. Se passar 2,5 s sem uma linha, volta ao vermelho e informa
+a falha no monitor; ao receber novamente, informa a recuperação.
+<pre><code>pio run -e uart-emissor-test -t upload
+pio run -e uart-receptor-test -t upload
+pio device monitor -e uart-receptor-test</code></pre>
 
 <h3>Teste de correção de rumo via UART</h3>
 <p>O emissor <code>uart-bno-emissor-test</code> lê o BNO055 e envia somente o
@@ -159,11 +183,24 @@ referência. O receptor <code>bno-move-test</code> calcula o PID, gira os motore
 para corrigir o rumo e para os motores se perder os dados UART por mais de
 300 ms. Ligue TX GPIO17 de cada placa ao RX GPIO18 da outra e una os GNDs.
 No monitor serial do receptor, use <code>q/a</code> para aumentar/diminuir Kp,
-<code>w/s</code> para Ki, <code>e/d</code> para Kd, <code>p</code> para pausar
-ou retomar e <code>r</code> para inverter o sentido de correção.</p>
+<code>w/s</code> para Ki e <code>e/d</code> para Kd. Os ganhos iniciais são
+Kp=0.083, Ki=0.0000035 e Kd=0.0010; os valores atuais aparecem na telemetria.</p>
 <pre><code>pio run -e uart-bno-emissor-test -t upload
 pio run -e bno-move-test -t upload
 pio device monitor -e bno-move-test</code></pre>
+
+<h3>Checklist de testes na IHM</h3>
+<p>No menu CHECKLIST, use MEXER para navegar pelos testes e SELECIONAR para
+abrir o teste ou ver o alvo PlatformIO correspondente. A tela mostra os
+códigos <code>bno-test</code>, <code>tssp-16-test</code>,
+<code>ultrassonicos-test</code>, <code>motores-test</code>,
+<code>motor-unitario-test</code>, <code>uart-receptor-test</code>,
+<code>uart-emissor-test</code> e <code>ldr-test</code>. O teste de solenoides
+fica em <code>src/TESTS/TEST_SOLENOIDES/*.ino</code> e ainda não possui
+ambiente PlatformIO próprio. A IHM não grava outro firmware: para executar um
+teste separado, grave o ambiente correspondente pelo computador, por exemplo
+<code>pio run -e motores-test -t upload</code>. Os testes de motores e
+solenoides devem ser executados em bancada controlada.</p>
 
 <hr>
 
