@@ -4,13 +4,15 @@
 #include <Adafruit_BNO055.h>
 #include <Adafruit_Sensor.h>
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 class BNO055
 {
 public:
     BNO055();
 
-    bool begin(uint8_t sda = 8, uint8_t scl = 9);
+    bool begin(uint8_t sda = ConfigPinos::Head::BNO055::SDA,
+               uint8_t scl = ConfigPinos::Head::BNO055::SCL);
     void update();
     void zero();
     void calibrateNorth();

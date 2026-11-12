@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 #include <math.h>
 #include <IRProtocol.h>
 
@@ -11,8 +12,8 @@ constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr uint32_t UART_BAUD = 460800;
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 
 const uint8_t pinos[NUM_SENSORES] = {
   21, 47, 48, 38, 39, 40, 41, 42,

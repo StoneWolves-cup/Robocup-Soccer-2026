@@ -2,6 +2,7 @@
 #define MOTORES_H
 
 #include "Omni.h"
+#include "ConfigPinos.h"
 
 
 class Motores
@@ -12,14 +13,14 @@ private:
 // TB6612FNG 1
 // ========================================================
 
-    static constexpr uint8_t M1_PWM  = 4;
-    static constexpr uint8_t M1_IN1 = 6;
-    static constexpr uint8_t M1_IN2 = 5;
+    static constexpr uint8_t M1_PWM  = ConfigPinos::Body::Motores::M1_PWM;
+    static constexpr uint8_t M1_IN1 = ConfigPinos::Body::Motores::M1_IN1;
+    static constexpr uint8_t M1_IN2 = ConfigPinos::Body::Motores::M1_IN2;
 
     // M3
-    static constexpr uint8_t M3_PWM  = 16;
-    static constexpr uint8_t M3_IN1 = 7;
-    static constexpr uint8_t M3_IN2 = 15;
+    static constexpr uint8_t M3_PWM  = ConfigPinos::Body::Motores::M3_PWM;
+    static constexpr uint8_t M3_IN1 = ConfigPinos::Body::Motores::M3_IN1;
+    static constexpr uint8_t M3_IN2 = ConfigPinos::Body::Motores::M3_IN2;
 
 
     // ========================================================
@@ -27,14 +28,14 @@ private:
     // ========================================================
 
     // M4
-    static constexpr uint8_t M4_PWM = 9;
-    static constexpr uint8_t M4_IN1 = 3;
-    static constexpr uint8_t M4_IN2 = 46;
+    static constexpr uint8_t M4_PWM = ConfigPinos::Body::Motores::M4_PWM;
+    static constexpr uint8_t M4_IN1 = ConfigPinos::Body::Motores::M4_IN1;
+    static constexpr uint8_t M4_IN2 = ConfigPinos::Body::Motores::M4_IN2;
 
     // M2
-    static constexpr uint8_t M2_PWM  = 37;
-    static constexpr uint8_t M2_IN1 = 8;
-    static constexpr uint8_t M2_IN2 = 38;
+    static constexpr uint8_t M2_PWM  = ConfigPinos::Body::Motores::M2_PWM;
+    static constexpr uint8_t M2_IN1 = ConfigPinos::Body::Motores::M2_IN1;
+    static constexpr uint8_t M2_IN2 = ConfigPinos::Body::Motores::M2_IN2;
 
     // Ajuste para inverter individualmente um motor, se necessario.
     static constexpr float INV_M1 = 1.0f;

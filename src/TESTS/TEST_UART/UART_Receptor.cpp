@@ -1,11 +1,12 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 namespace {
 constexpr uint32_t USB_SERIAL_BAUD = 460800;
 constexpr uint32_t UART_BAUD = 115200;
 constexpr uint32_t UART_TIMEOUT_MS = 2500;
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr size_t TAMANHO_BUFFER_MENSAGEM = 64;
 
 char bufferMensagem[TAMANHO_BUFFER_MENSAGEM] = {};

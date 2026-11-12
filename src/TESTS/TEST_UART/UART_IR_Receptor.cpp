@@ -1,11 +1,12 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 #include <IRProtocol.h>
 #include <string.h>
 
 namespace {
 constexpr uint32_t UART_BAUD = 460800;
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t TIMEOUT_COMUNICACAO_MS = 1000;
 
 uint8_t bufferUART[sizeof(IRActivityPacket)] = {};

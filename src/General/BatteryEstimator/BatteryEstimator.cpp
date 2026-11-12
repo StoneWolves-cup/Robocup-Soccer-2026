@@ -27,10 +27,19 @@ static const float kCurrentIdleThresholdA  = 0.15f;  // abaixo disso, consideram
 BatteryEstimator::BatteryEstimator()
     : _vRaw(0), _vFiltered(0), _vOpenCircuit(0), _current(0),
       _consumedMah(0), _socVoltage(0), _socCoulomb(100.0f),
-      _socCombined(100.0f), _initialized(false) {}
+      _socCombined(100.0f), _initialized(false), _voltagePinValid(false) {}
 
 void BatteryEstimator::begin() {
     analogReadResolution(12);
+    _voltagePinValid = digitalPinToAnalogChannel(PIN_VBAT_ADC) >= 0;
+    if (!_voltagePinValid) {
+        Serial.printf("ERRO: GPIO%d nao suporta ADC; leitura da bateria indisponivel.\n",
+                      PIN_VBAT_ADC);
+        _vRaw = _vFiltered = _vOpenCircuit = NAN;
+        _socVoltage = _socCoulomb = _socCombined = NAN;
+        _initialized = true;
+        return;
+    }
 #if HAS_CURRENT_SENSOR
     pinMode(PIN_CURRENT_ADC, INPUT);
 #endif
@@ -125,6 +134,7 @@ void BatteryEstimator::updateCombinedEstimate() {
 
 void BatteryEstimator::update(uint32_t dtMillis) {
     if (!_initialized) begin();
+    if (!_voltagePinValid) return;
 
     // --- Fase 1: leitura bruta ---
     _vRaw = readVoltageOnce();
@@ -153,57 +163,4 @@ void BatteryEstimator::resetCoulombCounter(float socPercent) {
     if (socPercent > 100.0f) socPercent = 100.0f;
     _consumedMah = (100.0f - socPercent) / 100.0f * BATTERY_CAPACITY_MAH;
     _socCoulomb = socPercent;
-}
-
-BatteryEstimator battery;
-
-uint32_t lastUpdateMs = 0;
-uint32_t lastLogMs = 0;
-
-void setup() {
-    Serial.begin(115200);
-    delay(500);
-
-    battery.begin();
-    lastUpdateMs = millis();
-    lastLogMs = lastUpdateMs;
-
-    Serial.println();
-    Serial.println("=== Teste de leitura percentual da bateria ===");
-    Serial.printf("ADC: GPIO%d | Divisor: R1=%.0f ohms, R2=%.0f ohms\n",
-                  PIN_VBAT_ADC, DIVIDER_R1_OHM, DIVIDER_R2_OHM);
-    Serial.println("Curva configurada para bateria Li-ion 1S.");
-    Serial.println("Confira o divisor e a curva em BatteryEstimator.h para sua bateria.");
-}
-
-void loop() {
-    const uint32_t now = millis();
-
-    if (now - lastUpdateMs >= UPDATE_PERIOD_MS) {
-        battery.update(now - lastUpdateMs);
-        lastUpdateMs = now;
-    }
-
-    if (now - lastLogMs >= LOG_PERIOD_MS) {
-        lastLogMs = now;
-
-        const float voltage = battery.getFilteredVoltage();
-        const float percentage = battery.getPercentCombined();
-        const bool readingValid = isfinite(voltage) && voltage > 0.1f &&
-                                  isfinite(percentage) &&
-                                  percentage >= 0.0f && percentage <= 100.0f;
-
-        Serial.printf(
-            "%s | Tensao: %.3f V | Percentual: %.1f %% | "
-            "SOC por tensao: %.1f %% | SOC por coulomb: %.1f %%\n",
-            readingValid ? "LEITURA OK" : "FALHA NA LEITURA",
-            voltage,
-            percentage,
-            battery.getPercentVoltageBased(),
-            battery.getPercentCoulomb());
-
-        if (!readingValid) {
-            Serial.println("Verifique a bateria, o divisor resistivo e o pino ADC.");
-        }
-    }
 }

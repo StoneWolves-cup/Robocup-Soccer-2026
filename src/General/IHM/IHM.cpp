@@ -1,22 +1,26 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <U8g2lib.h>
+#include <BatteryEstimator.h>
+#include <MotoresTeste.h>
+#include <ConfigPinos.h>
+#include <math.h>
 
 // =====================================================
 // I2C
 // =====================================================
 
-#define SDA_PIN 21
-#define SCK_PIN 47
+constexpr uint8_t SDA_PIN = ConfigPinos::Body::IHM::OLED::SDA;
+constexpr uint8_t SCK_PIN = ConfigPinos::Body::IHM::OLED::SCL;
 
 // =====================================================
 // =====================================================
 // BOTOES
 // =====================================================
 
-#define BOTAO_SELECIONAR 1
-#define BOTAO_MEXER      42
-#define BOTAO_VOLTAR     2
+constexpr uint8_t BOTAO_SELECIONAR = ConfigPinos::Body::IHM::Botoes::SELECIONAR;
+constexpr uint8_t BOTAO_MEXER = ConfigPinos::Body::IHM::Botoes::MOVER;
+constexpr uint8_t BOTAO_VOLTAR = ConfigPinos::Body::IHM::Botoes::VOLTAR;
 
 // =====================================================
 // =====================================================
@@ -62,6 +66,10 @@ enum Tela {
 };
 
 Tela tela = TELA_MENU;
+BatteryEstimator estimadorBateria;
+Motores motoresChecklist;
+Omni omniChecklist;
+uint32_t ultimaAtualizacaoBateriaMs = 0;
 
 // =====================================================
 // MENU PRINCIPAL
@@ -198,23 +206,32 @@ float telemetriaHeading = 0.0f;
 float telemetriaGyroZ = 0.0f;
 float telemetriaUltra[4] = {};
 uint8_t telemetriaUltraMascara = 0;
-uint8_t telemetriaIR[16] = {};
+float telemetriaDirecaoIR = 0.0f;
 bool telemetriaBNOValida = false;
 bool telemetriaUltraValida = false;
 bool telemetriaIRValida = false;
+bool telemetriaBolaDetectada = false;
+bool telemetriaRegiaoBrancaLDR[4] = {};
 
 void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido, const float distanciasUltra[4],
                              uint8_t mascaraUltra, bool ultraValido,
-                             const uint8_t atividadesIR[16], bool irValido) {
+                             float direcaoIR, bool bolaDetectada, bool irValido) {
   telemetriaHeading = headingDegrees;
   telemetriaGyroZ = gyroZDegreesPerSecond;
   telemetriaBNOValida = bnoValido;
   for (uint8_t i = 0; i < 4; ++i) telemetriaUltra[i] = distanciasUltra[i];
   telemetriaUltraMascara = mascaraUltra;
   telemetriaUltraValida = ultraValido;
-  for (uint8_t i = 0; i < 16; ++i) telemetriaIR[i] = atividadesIR[i];
+  telemetriaDirecaoIR = direcaoIR;
+  telemetriaBolaDetectada = bolaDetectada;
   telemetriaIRValida = irValido;
+}
+
+void IHM_atualizarLDR(const bool regioesBrancas[4]) {
+  for (uint8_t i = 0; i < 4; ++i) {
+    telemetriaRegiaoBrancaLDR[i] = regioesBrancas[i];
+  }
 }
 
 // =====================================================
@@ -287,7 +304,7 @@ void telaCarregamento() {
   for (
     int progresso = 0;
     progresso <= 100;
-    progresso += 2
+    progresso += 10
   ) {
 
     oled.clearBuffer();
@@ -346,10 +363,10 @@ void telaCarregamento() {
 
     oled.sendBuffer();
 
-    delay(120);
+    delay(30);
   }
 
-  delay(500);
+  delay(150);
 }
 
 // =====================================================
@@ -1068,6 +1085,25 @@ void mostrarInfoTesteChecklist() {
   oled.sendBuffer();
 }
 
+void testarMotoresNaTela() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(30, 9, "CHECKLIST");
+  oled.drawHLine(8, 13, 112);
+  oled.drawStr(25, 30, "TESTE MOTORES");
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(20, 45, "FRENTE ESQ TRAS DIR");
+  oled.sendBuffer();
+
+  motoresChecklist.begin();
+  motoresChecklist.parar();
+  executarTesteTranslacaoMotores(motoresChecklist, omniChecklist);
+  motoresChecklist.parar();
+
+  tela = TELA_INFO_TESTE;
+  mostrarInfoTesteChecklist();
+}
+
 // =====================================================
 // EM BREVE
 // =====================================================
@@ -1186,6 +1222,25 @@ void mostrarResultadoReset(
   delay(1000);
 }
 
+void mostrarLDR() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(54, 9, "LDR");
+  oled.drawHLine(8, 13, 112);
+  oled.setFont(u8g2_font_5x8_tr);
+
+  const char *nomes[4] = {"CENTRO", "ESQ", "DIR", "INF"};
+  for (uint8_t i = 0; i < 4; ++i) {
+    const uint8_t y = 24 + i * 10;
+    oled.drawStr(6, y, nomes[i]);
+    oled.setCursor(62, y);
+    oled.print(telemetriaRegiaoBrancaLDR[i] ? "BRANCO" : "VERDE");
+  }
+
+  oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
+  oled.sendBuffer();
+}
+
 void mostrarInfra() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1193,20 +1248,51 @@ void mostrarInfra() {
   oled.setFont(u8g2_font_5x8_tr);
   if (!telemetriaIRValida) {
     oled.drawStr(18, 36, "SEM DADOS UART");
+  } else if (!telemetriaBolaDetectada) {
+    oled.drawStr(12, 36, "BOLA NAO DETECTADA");
   } else {
-    for (uint8_t i = 0; i < 16; ++i) {
-      const uint8_t coluna = i % 4;
-      const uint8_t linha = i / 4;
-      const uint8_t x = coluna * 32 + 2;
-      const uint8_t y = 24 + linha * 10;
-      oled.setCursor(x, y);
-      oled.print(i + 1);
-      oled.print(":");
-      oled.print(telemetriaIR[i]);
-      oled.print("%");
-    }
+    oled.setCursor(20, 38);
+    oled.print("ANGULO: ");
+    oled.print(telemetriaDirecaoIR, 1);
+    oled.print(" graus");
   }
   oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
+  oled.sendBuffer();
+}
+
+void mostrarBateria() {
+  const float voltage = estimadorBateria.getFilteredVoltage();
+  const float percentage = estimadorBateria.getPercentCombined();
+  const bool readingValid = isfinite(voltage) && voltage > 0.1f &&
+                            isfinite(percentage) &&
+                            percentage >= 0.0f && percentage <= 100.0f;
+
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(38, 9, "BATERIA");
+  oled.drawHLine(8, 13, 112);
+
+  oled.setFont(u8g2_font_5x8_tr);
+  if (readingValid) {
+    oled.setCursor(12, 27);
+    oled.print("CARGA: ");
+    oled.print(percentage, 1);
+    oled.print("%");
+
+    oled.setCursor(12, 38);
+    oled.print("TENSAO: ");
+    oled.print(voltage, 2);
+    oled.print(" V");
+
+    oled.drawFrame(8, 44, 112, 10);
+    const uint8_t barWidth = static_cast<uint8_t>(percentage * 1.08f);
+    if (barWidth > 0) oled.drawBox(10, 46, barWidth, 6);
+  } else {
+    oled.drawStr(16, 29, "LEITURA INVALIDA");
+    oled.drawStr(12, 41, "VERIFIQUE BATERIA");
+  }
+
+  oled.drawStr(4, 63, "VOLTAR = MENU");
   oled.sendBuffer();
 }
 
@@ -1214,6 +1300,8 @@ void IHM_begin() {
   pinMode(BOTAO_SELECIONAR, INPUT_PULLDOWN);
   pinMode(BOTAO_MEXER, INPUT_PULLDOWN);
   pinMode(BOTAO_VOLTAR, INPUT_PULLDOWN);
+  estimadorBateria.begin();
+  ultimaAtualizacaoBateriaMs = millis();
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
@@ -1232,6 +1320,10 @@ void IHM_update() {
       BOTAO_VOLTAR, leituraBrutaVoltar, estadoEstavelVoltar,
       ultimaMudancaBrutaVoltar);
   const unsigned long agora = millis();
+  if (agora - ultimaAtualizacaoBateriaMs >= UPDATE_PERIOD_MS) {
+    estimadorBateria.update(agora - ultimaAtualizacaoBateriaMs);
+    ultimaAtualizacaoBateriaMs = agora;
+  }
   const bool clicouSelecionar = estadoAnteriorSelecionar == LOW && selecionar == HIGH &&
                                 agora - ultimoSelecionar > DEBOUNCE;
   const bool clicouMexer = estadoAnteriorMexer == LOW && mexer == HIGH &&
@@ -1279,7 +1371,7 @@ void IHM_update() {
           mostrarMenuChecklist();
         } else {
           tela = TELA_BATERIA;
-          mostrarEmBreve("BATERIA");
+          mostrarBateria();
         }
         break;
       case TELA_ESTRATEGIA:
@@ -1307,7 +1399,7 @@ void IHM_update() {
             break;
           default:
             tela = TELA_LDR;
-            mostrarEmBreve("LDR");
+            mostrarLDR();
             break;
         }
         break;
@@ -1337,6 +1429,8 @@ void IHM_update() {
           testarBNONaTela();
         } else if (opcaoChecklist == 2) {
           testarUltraNaTela();
+        } else if (opcaoChecklist == 3) {
+          testarMotoresNaTela();
         } else {
           tela = TELA_INFO_TESTE;
           mostrarInfoTesteChecklist();
@@ -1366,7 +1460,7 @@ void IHM_update() {
     } else if (tela == TELA_TELEMETRIA || tela == TELA_CHECKLIST) {
       tela = TELA_MENU;
       mostrarMenu();
-    } else if (tela == TELA_ULTRA || tela == TELA_INFRA) {
+    } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR) {
       tela = TELA_TELEMETRIA;
       mostrarMenuTelemetria();
     } else if (tela == TELA_TESTE_BNO || tela == TELA_TESTE_ULTRA) {
@@ -1387,6 +1481,8 @@ void IHM_update() {
     if (tela == TELA_BNO_LEITURA) mostrarBNO();
     else if (tela == TELA_ULTRA) mostrarUltra();
     else if (tela == TELA_INFRA) mostrarInfra();
+    else if (tela == TELA_LDR) mostrarLDR();
+    else if (tela == TELA_BATERIA) mostrarBateria();
     else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();
   }
 

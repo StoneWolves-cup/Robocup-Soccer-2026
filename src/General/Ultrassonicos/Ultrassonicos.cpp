@@ -21,13 +21,29 @@ void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   }
 }
 
-void IRAM_ATTR eco11Mudou() { registrarBorda(0, gpio_get_level(GPIO_NUM_11)); }
-void IRAM_ATTR eco12Mudou() { registrarBorda(1, gpio_get_level(GPIO_NUM_12)); }
-void IRAM_ATTR eco13Mudou() { registrarBorda(2, gpio_get_level(GPIO_NUM_13)); }
-void IRAM_ATTR eco14Mudou() { registrarBorda(3, gpio_get_level(GPIO_NUM_14)); }
+void IRAM_ATTR eco11Mudou() {
+  registrarBorda(0, gpio_get_level(static_cast<gpio_num_t>(
+      ConfigPinos::Teste::Ultrassonicos::ECHO1)));
+}
+void IRAM_ATTR eco12Mudou() {
+  registrarBorda(1, gpio_get_level(static_cast<gpio_num_t>(
+      ConfigPinos::Teste::Ultrassonicos::ECHO2)));
+}
+void IRAM_ATTR eco13Mudou() {
+  registrarBorda(2, gpio_get_level(static_cast<gpio_num_t>(
+      ConfigPinos::Teste::Ultrassonicos::ECHO3)));
+}
+void IRAM_ATTR eco14Mudou() {
+  registrarBorda(3, gpio_get_level(static_cast<gpio_num_t>(
+      ConfigPinos::Teste::Ultrassonicos::ECHO4)));
+}
 }  // namespace
 
-const uint8_t Ultrassonicos::PINOS_ECHO[Ultrassonicos::QUANTIDADE] = {11, 12, 13, 14};
+const uint8_t Ultrassonicos::PINOS_ECHO[Ultrassonicos::QUANTIDADE] = {
+    ConfigPinos::Teste::Ultrassonicos::ECHO[0],
+    ConfigPinos::Teste::Ultrassonicos::ECHO[1],
+    ConfigPinos::Teste::Ultrassonicos::ECHO[2],
+    ConfigPinos::Teste::Ultrassonicos::ECHO[3]};
 
 void Ultrassonicos::begin() {
   pinMode(PINO_TRIG, OUTPUT);

@@ -2,12 +2,13 @@
 #define ULTRASSONICOS_H
 
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 // Quatro sensores ultrassonicos com TRIG compartilhado.
 class Ultrassonicos {
 public:
   static constexpr uint8_t QUANTIDADE = 4;
-  static constexpr uint8_t PINO_TRIG = 10;
+  static constexpr uint8_t PINO_TRIG = ConfigPinos::Teste::Ultrassonicos::TRIG;
   static const uint8_t PINOS_ECHO[QUANTIDADE];
 
   void begin();
