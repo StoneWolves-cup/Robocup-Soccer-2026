@@ -51,7 +51,7 @@ Motor control electronics</p>
 <hr>
 
 ## Repository Structure
-
+<p>
 Robocup-Soccer-2026/
 │
 ├── include/
@@ -82,7 +82,7 @@ Robocup-Soccer-2026/
 │
 ├── platformio.ini
 └── .gitignore
-
+</p>  
 <hr>
 
 ## Getting Started
