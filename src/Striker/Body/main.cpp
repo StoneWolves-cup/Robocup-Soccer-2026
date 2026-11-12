@@ -14,9 +14,13 @@ void IHM_update();
 void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido,
                              const float distanciasUltra[4], uint8_t mascaraUltra,
-                             bool ultraValido, float direcaoIR,
+                             bool ultraValido,
+                             const uint8_t atividadesIR[IR_SENSOR_COUNT],
+                             float direcaoIR,
                              bool bolaDetectada, bool irValido);
 void IHM_atualizarLDR(const bool regioesBrancas[4]);
+bool IHM_testeTSSPAtivo();
+bool IHM_estrategiaAtaqueAtiva();
 
 namespace {
 constexpr uint32_t USB_SERIAL_BAUD = 460800;
@@ -706,11 +710,16 @@ void loop() {
   IHM_atualizarTelemetria(
       ultimoPacoteBNO.headingDegrees, ultimoPacoteBNO.gyroZDegreesPerSecond,
       bnoTelemetriaValida, ultimoPacoteUltra.distanceCm,
-      ultimoPacoteUltra.validMask, ultraTelemetriaValida,
+      ultimoPacoteUltra.validMask, ultraTelemetriaValida, ultimoPacote.activity,
       ultimaDirecaoBola, ultimaBolaDetectada, irTelemetriaValida);
 
   if (quadroNovo) {
     imprimirDadosIR(ultimoPacote);
+  }
+
+  if (!IHM_estrategiaAtaqueAtiva() || IHM_testeTSSPAtivo()) {
+    motores.parar();
+    return;
   }
 
   if (!USAR_IR) {

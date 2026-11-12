@@ -10,10 +10,10 @@
 //   0°   = frente
 //   90°  = esquerda
 //   180° = traseira
-//   270° = direita
+//   -90° = direita
 //
-// Os ângulos positivos seguem o sentido anti-horário, olhando
-// o robô de cima.
+// Os índices dos sensores aumentam no sentido horário, olhando
+// o robô de cima; ângulos positivos continuam no sentido anti-horário.
 // ============================================================
 
 constexpr uint8_t NUM_SENSORES = 16;
@@ -93,7 +93,6 @@ uint32_t inicioJanela;
 uint32_t ultimaSerial = 0;
 
 // Resultados calculados para a janela mais recente.
-float direcaoGraus = 0.0f;
 float confianca = 0.0f;
 bool bolaDetectada = false;
 
@@ -169,15 +168,6 @@ void calcularDirecao() {
     return;
   }
 
-  // Converte o resultado de atan2 para o intervalo [-180°, 180°].
-  direcaoGraus = atan2f(vetorYFiltrado, vetorXFiltrado) * RAD_TO_DEG;
-  if (direcaoGraus < 0.0f) {
-    direcaoGraus += 360.0f;
-  }
-  if (direcaoGraus > 180.0f) {
-    direcaoGraus -= 360.0f;
-  }
-
   bolaDetectada = true;
 }
 
@@ -204,7 +194,7 @@ void fecharJanela() {
 }
 
 /**
- * Envia as atividades dos sensores e o resultado direcional
+ * Envia as atividades dos sensores e o estado de deteccao
  * ao monitor serial.
  */
 void imprimirDados() {
@@ -221,14 +211,7 @@ void imprimirDados() {
   Serial.print(" | Bola: ");
   Serial.print(bolaDetectada ? "SIM" : "NAO");
 
-  if (bolaDetectada) {
-    Serial.print(" | Direcao: ");
-    Serial.print(direcaoGraus, 1);
-    Serial.print(" graus");
-  }
-
-  Serial.print(" | Confianca: ");
-  Serial.println(confianca, 2);
+  Serial.println();
 }
 
 void setup() {
