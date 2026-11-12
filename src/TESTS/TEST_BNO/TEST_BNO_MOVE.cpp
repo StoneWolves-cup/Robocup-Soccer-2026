@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 #include <math.h>
 #include <stdlib.h>
 #include <Motores.h>
@@ -6,8 +7,8 @@
 #include <PID.h>
 
 namespace {
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t TIMEOUT_EMISSOR_MS = 300;
 constexpr uint32_t INTERVALO_TELEMETRIA_MS = 100;
 

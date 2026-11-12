@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 #include <math.h>
 
 // ============================================================
@@ -21,8 +22,22 @@ constexpr uint8_t NUM_SENSORES = 16;
 // O índice de cada pino deve corresponder ao mesmo índice
 // da tabela angulosSensores.
 const uint8_t pinos[NUM_SENSORES] = {
-  21, 47, 48, 38, 39, 40, 41,
-  42, 16, 15, 7, 6, 5, 4, 1, 2 
+  ConfigPinos::Head::TSSP::PINOS[0],
+  ConfigPinos::Head::TSSP::PINOS[1],
+  ConfigPinos::Head::TSSP::PINOS[2],
+  ConfigPinos::Head::TSSP::PINOS[3],
+  ConfigPinos::Head::TSSP::PINOS[4],
+  ConfigPinos::Head::TSSP::PINOS[5],
+  ConfigPinos::Head::TSSP::PINOS[6],
+  ConfigPinos::Head::TSSP::PINOS[7],
+  ConfigPinos::Head::TSSP::PINOS[8],
+  ConfigPinos::Head::TSSP::PINOS[9],
+  ConfigPinos::Head::TSSP::PINOS[10],
+  ConfigPinos::Head::TSSP::PINOS[11],
+  ConfigPinos::Head::TSSP::PINOS[12],
+  ConfigPinos::Head::TSSP::PINOS[13],
+  ConfigPinos::Head::TSSP::PINOS[14],
+  ConfigPinos::Head::TSSP::PINOS[15]
 };
 
 // Ângulo nominal de cada sensor em relação à frente do robô.

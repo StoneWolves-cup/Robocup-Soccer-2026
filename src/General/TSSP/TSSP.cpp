@@ -1,10 +1,25 @@
 #include <TSSP.h>
+#include <ConfigPinos.h>
 
 // Mapa copiado do teste TSSP de 16 sensores. Adeque a placa/cabos conforme
 // o pinout real do ESP32-S3 usado no modulo de sensores.
 const uint8_t TSSP::PINOS[TSSP::NUM_SENSORES] = {
-  21, 47, 48, 38, 39, 40, 41,
-  42, 16, 15, 7, 6, 5, 4, 1, 2 
+  ConfigPinos::Head::TSSP::PINOS[0],
+  ConfigPinos::Head::TSSP::PINOS[1],
+  ConfigPinos::Head::TSSP::PINOS[2],
+  ConfigPinos::Head::TSSP::PINOS[3],
+  ConfigPinos::Head::TSSP::PINOS[4],
+  ConfigPinos::Head::TSSP::PINOS[5],
+  ConfigPinos::Head::TSSP::PINOS[6],
+  ConfigPinos::Head::TSSP::PINOS[7],
+  ConfigPinos::Head::TSSP::PINOS[8],
+  ConfigPinos::Head::TSSP::PINOS[9],
+  ConfigPinos::Head::TSSP::PINOS[10],
+  ConfigPinos::Head::TSSP::PINOS[11],
+  ConfigPinos::Head::TSSP::PINOS[12],
+  ConfigPinos::Head::TSSP::PINOS[13],
+  ConfigPinos::Head::TSSP::PINOS[14],
+  ConfigPinos::Head::TSSP::PINOS[15]
 };
 
 TSSP::TSSP() : totalAmostras_(0), inicioJanela_(0) {

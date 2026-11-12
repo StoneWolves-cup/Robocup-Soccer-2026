@@ -51,7 +51,7 @@ void setup()
 
     if (!sensorBNO.begin())
     {
-        Serial.println("ERRO: BNO055 nao reconhecido. Verifique alimentacao e I2C (SDA=21, SCL=22).");
+        Serial.println("ERRO: BNO055 nao reconhecido. Verifique alimentacao e I2C (SDA=8, SCL=9).");
         while (true)
         {
             delay(1000);

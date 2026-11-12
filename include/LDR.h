@@ -1,23 +1,31 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 // ============================================================
 // 74HC4051 / HW-178
 // ============================================================
 
 // Z / COM do multiplexador
-constexpr uint8_t MUX_SIG = 34;
+constexpr uint8_t MUX_SIG = ConfigPinos::Teste::LDR8::MUX_SINAL;
 
 // Seleção do canal
-constexpr uint8_t MUX_S0 = 25;
-constexpr uint8_t MUX_S1 = 26;
-constexpr uint8_t MUX_S2 = 27;
+constexpr uint8_t MUX_S0 = ConfigPinos::Teste::LDR8::MUX_S0;
+constexpr uint8_t MUX_S1 = ConfigPinos::Teste::LDR8::MUX_S1;
+constexpr uint8_t MUX_S2 = ConfigPinos::Teste::LDR8::MUX_S2;
 
 // Quantidade de LDRs
 constexpr uint8_t SENSOR_COUNT = 8;
 
 // LEDs dos sensores
 constexpr uint8_t LED_PINS[SENSOR_COUNT] = {
-    4, 5, 18, 19, 21, 22, 23, 32
+    ConfigPinos::Teste::LDR8::LEDS[0],
+    ConfigPinos::Teste::LDR8::LEDS[1],
+    ConfigPinos::Teste::LDR8::LEDS[2],
+    ConfigPinos::Teste::LDR8::LEDS[3],
+    ConfigPinos::Teste::LDR8::LEDS[4],
+    ConfigPinos::Teste::LDR8::LEDS[5],
+    ConfigPinos::Teste::LDR8::LEDS[6],
+    ConfigPinos::Teste::LDR8::LEDS[7]
 };
 
 // Quantidade de leituras para fazer média

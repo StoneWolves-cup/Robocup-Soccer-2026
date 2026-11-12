@@ -1,14 +1,15 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 // ============================================================
 // PINOS
 // ============================================================
 
-#define FIM_CURSO_1 15
-#define FIM_CURSO_2 2
+#define FIM_CURSO_1 ConfigPinos::Teste::Solenoides::FIM_CURSO1
+#define FIM_CURSO_2 ConfigPinos::Teste::Solenoides::FIM_CURSO2
 
-#define RELE_1 4
-#define RELE_2 5
+#define RELE_1 ConfigPinos::Teste::Solenoides::RELE1
+#define RELE_2 ConfigPinos::Teste::Solenoides::RELE2
 
 
 // ============================================================

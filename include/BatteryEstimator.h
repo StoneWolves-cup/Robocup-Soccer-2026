@@ -2,19 +2,20 @@
 #define BATTERY_ESTIMATOR_H
 
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 // ======================================================================
 // CONFIGURAÇÃO DE HARDWARE
 // ======================================================================
 
 // Pino ADC do ESP32 ligado ao ponto médio do divisor de tensão
-#define PIN_VBAT_ADC        4
+#define PIN_VBAT_ADC        ConfigPinos::Body::Bateria::VBAT_ADC
 
 // Se houver sensor de corrente (ex: ACS712 / INA219 via leitura analógica
 // simples), defina HAS_CURRENT_SENSOR. Caso contrário, o estimador roda
 // apenas com Coulomb Counting desativado e usa somente a tensão (Fase 1-3).
 #define HAS_CURRENT_SENSOR  0
-#define PIN_CURRENT_ADC     35
+#define PIN_CURRENT_ADC     ConfigPinos::Body::Bateria::CORRENTE_ADC
 
 // Divisor de tensão: Vadc = Vbat * R2 / (R1 + R2)
 // Valores de exemplo (ajuste para o seu circuito real e confira a faixa
@@ -96,6 +97,7 @@ private:
     float _socCombined;
 
     bool _initialized;
+    bool _voltagePinValid;
 
     float readVoltageOnce();
     float readCurrentOnce();

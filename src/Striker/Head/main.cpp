@@ -2,43 +2,36 @@
 #include <math.h>
 #include <IRProtocol.h>
 #include <BNO055.h>
+#include <TSSP.h>
+#include <ConfigPinos.h>
 
 namespace {
 constexpr uint8_t NUM_SENSORES = IR_SENSOR_COUNT;
-constexpr uint32_t JANELA_US = 5000;
 constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
-constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 1000;
+constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 50;
 constexpr uint32_t USB_SERIAL_BAUD = 460800;
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
 constexpr uint32_t UART_BAUD = 115200;
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
-constexpr uint8_t BNO_SDA_PIN = 8;
-constexpr uint8_t BNO_SCL_PIN = 9;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
+constexpr uint8_t BNO_SDA_PIN = ConfigPinos::Head::BNO055::SDA;
+constexpr uint8_t BNO_SCL_PIN = ConfigPinos::Head::BNO055::SCL;
 
-// Mesma ordem de pinos, angulos e aquisicao usada no teste TSSP de 16 sensores.
-const uint8_t pinos[NUM_SENSORES] = {
-  21, 47, 48, 38, 39, 40, 41,
-  42, 16, 15, 7, 6, 5, 4, 1, 2
-};
 const float angulosSensores[NUM_SENSORES] = {
   0.0f, 22.5f, 45.0f, 67.5f, 90.0f, 112.5f, 135.0f, 157.5f,
   180.0f, 202.5f, 225.0f, 247.5f, 270.0f, 292.5f, 315.0f, 337.5f
 };
 
-uint32_t totalAmostras = 0;
-uint32_t lowCount[NUM_SENSORES] = {};
 float atividade[NUM_SENSORES] = {};
 float peso[NUM_SENSORES] = {};
 float vetorXFiltrado = 0.0f;
 float vetorYFiltrado = 0.0f;
 float somaPesosFiltrada = 0.0f;
 bool filtroIniciado = false;
-uint32_t inicioJanela = 0;
 uint32_t ultimaSerial = 0;
 uint32_t ultimoEnvio = 0;
 uint16_t sequenciaIR = 0;
@@ -47,6 +40,7 @@ float direcaoGraus = 0.0f;
 float confianca = 0.0f;
 bool bolaDetectada = false;
 BNO055 sensorBNO;
+TSSP sensorTSSP;
 bool bnoDisponivel = false;
 uint32_t ultimaAtualizacaoBNO = 0;
 uint32_t ultimaTentativaBNO = 0;
@@ -97,15 +91,11 @@ void calcularDirecao() {
   bolaDetectada = true;
 }
 
-void fecharJanela() {
-  if (totalAmostras == 0) return;
-
+void atualizarAtividadeTSSP() {
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
-    atividade[i] = 100.0f * lowCount[i] / totalAmostras;
-    lowCount[i] = 0;
+    atividade[i] = sensorTSSP.atividadePercentual(i);
   }
 
-  totalAmostras = 0;
   calcularDirecao();
 }
 
@@ -151,7 +141,7 @@ void iniciarBNO() {
     Serial.println("BNO055 inicializado; telemetria sera enviada ao Body.");
   } else {
     Serial.println(
-        "ERRO: BNO055 nao encontrado em SDA=8/SCL=9; nova tentativa em 1 s. "
+        "ERRO: BNO055 nao encontrado em SDA=8/SCL=9; nova tentativa em 50 ms. "
         "Body deve manter os motores parados.");
   }
 }
@@ -180,13 +170,7 @@ void setup() {
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
 
   iniciarBNO();
-
-  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
-    if (pinos[i] >= 34 && pinos[i] <= 39) pinMode(pinos[i], INPUT);
-    else pinMode(pinos[i], INPUT_PULLUP);
-  }
-
-  inicioJanela = micros();
+  sensorTSSP.begin();
   Serial.println("Coroa TSSP4038 - 16 sensores");
   Serial.println(
       "Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP ativo. "
@@ -194,16 +178,7 @@ void setup() {
 }
 
 void loop() {
-  for (uint8_t i = 0; i < NUM_SENSORES; i++) {
-    if (digitalRead(pinos[i]) == LOW) lowCount[i]++;
-  }
-  totalAmostras++;
-
-  const uint32_t agoraUs = micros();
-  if ((uint32_t)(agoraUs - inicioJanela) >= JANELA_US) {
-    fecharJanela();
-    inicioJanela = agoraUs;
-  }
+  if (sensorTSSP.atualizar()) atualizarAtividadeTSSP();
 
   const uint32_t agoraMs = millis();
   if (!bnoDisponivel &&

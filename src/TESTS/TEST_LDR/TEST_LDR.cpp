@@ -1,12 +1,13 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 
 constexpr uint8_t SENSOR_COUNT = 15;
 constexpr uint8_t REGION_COUNT = 4;
-constexpr uint8_t MUX_SIG = 14;
-constexpr uint8_t MUX_S0 = 10;
-constexpr uint8_t MUX_S1 = 11;
-constexpr uint8_t MUX_S2 = 12;
-constexpr uint8_t MUX_S3 = 13;
+constexpr uint8_t MUX_SIG = ConfigPinos::Body::LDR::MUX_SINAL;
+constexpr uint8_t MUX_S0 = ConfigPinos::Body::LDR::MUX_S0;
+constexpr uint8_t MUX_S1 = ConfigPinos::Body::LDR::MUX_S1;
+constexpr uint8_t MUX_S2 = ConfigPinos::Body::LDR::MUX_S2;
+constexpr uint8_t MUX_S3 = ConfigPinos::Body::LDR::MUX_S3;
 constexpr uint8_t SAMPLE_COUNT = 12;
 constexpr uint8_t ADC_DISCARD_COUNT = 2;
 constexpr uint16_t CALIBRATION_SAMPLES = 8;

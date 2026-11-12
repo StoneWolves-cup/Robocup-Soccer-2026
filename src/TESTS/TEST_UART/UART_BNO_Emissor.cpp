@@ -1,9 +1,10 @@
 #include <Arduino.h>
+#include <ConfigPinos.h>
 #include <BNO055.h>
 
 namespace {
-constexpr int UART_RX_PIN = 18;
-constexpr int UART_TX_PIN = 17;
+constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
+constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t INTERVALO_ENVIO_MS = 10;
 
 BNO055 sensorBNO;
