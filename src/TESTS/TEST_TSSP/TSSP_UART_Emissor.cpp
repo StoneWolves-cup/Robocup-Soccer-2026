@@ -5,7 +5,7 @@
 #include <math.h>
 
 namespace {
-constexpr uint8_t NUM_SENSORES = IR_SENSOR_COUNT;
+constexpr uint16_t NUM_SENSORES = IR_SENSOR_COUNT;
 constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t UART_BAUD = 460800;

@@ -4,6 +4,7 @@
 #include <BatteryEstimator.h>
 #include <MotoresTeste.h>
 #include <ConfigPinos.h>
+#include <IRProtocol.h>
 #include <math.h>
 
 // =====================================================
@@ -62,6 +63,7 @@ enum Tela {
 
   TELA_TESTE_BNO,
   TELA_TESTE_ULTRA,
+  TELA_TESTE_TSSP,
   TELA_INFO_TESTE
 };
 
@@ -89,6 +91,7 @@ const int totalMenu = 4;
 
 int opcaoEstrategia = 0;
 const int totalEstrategia = 2;
+bool estrategiaAtaqueAtiva = false;
 
 // 0 = ATAQUE
 // 1 = DEFESA
@@ -206,6 +209,7 @@ float telemetriaHeading = 0.0f;
 float telemetriaGyroZ = 0.0f;
 float telemetriaUltra[4] = {};
 uint8_t telemetriaUltraMascara = 0;
+uint8_t telemetriaAtividadeIR[IR_SENSOR_COUNT] = {};
 float telemetriaDirecaoIR = 0.0f;
 bool telemetriaBNOValida = false;
 bool telemetriaUltraValida = false;
@@ -216,6 +220,7 @@ bool telemetriaRegiaoBrancaLDR[4] = {};
 void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido, const float distanciasUltra[4],
                              uint8_t mascaraUltra, bool ultraValido,
+                             const uint8_t atividadesIR[IR_SENSOR_COUNT],
                              float direcaoIR, bool bolaDetectada, bool irValido) {
   telemetriaHeading = headingDegrees;
   telemetriaGyroZ = gyroZDegreesPerSecond;
@@ -223,6 +228,9 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
   for (uint8_t i = 0; i < 4; ++i) telemetriaUltra[i] = distanciasUltra[i];
   telemetriaUltraMascara = mascaraUltra;
   telemetriaUltraValida = ultraValido;
+  for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
+    telemetriaAtividadeIR[i] = atividadesIR[i];
+  }
   telemetriaDirecaoIR = direcaoIR;
   telemetriaBolaDetectada = bolaDetectada;
   telemetriaIRValida = irValido;
@@ -232,6 +240,14 @@ void IHM_atualizarLDR(const bool regioesBrancas[4]) {
   for (uint8_t i = 0; i < 4; ++i) {
     telemetriaRegiaoBrancaLDR[i] = regioesBrancas[i];
   }
+}
+
+bool IHM_testeTSSPAtivo() {
+  return tela == TELA_TESTE_TSSP;
+}
+
+bool IHM_estrategiaAtaqueAtiva() {
+  return estrategiaAtaqueAtiva;
 }
 
 // =====================================================
@@ -1085,6 +1101,33 @@ void mostrarInfoTesteChecklist() {
   oled.sendBuffer();
 }
 
+void mostrarTesteTSSP() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_4x6_tr);
+
+  if (telemetriaIRValida) {
+    oled.drawStr(
+        4, 8, telemetriaBolaDetectada ? "IR/TSSP  BOLA: SIM"
+                                     : "IR/TSSP  BOLA: NAO");
+
+    for (uint8_t i = 0; i < IR_SENSOR_COUNT; ++i) {
+      const uint8_t coluna = i % 4;
+      const uint8_t linha = i / 4;
+      oled.setCursor(2 + coluna * 32, 20 + linha * 10);
+      if (i + 1 < 10) oled.print('0');
+      oled.print(i + 1);
+      oled.print(':');
+      oled.print(telemetriaAtividadeIR[i]);
+      oled.print('%');
+    }
+  } else {
+    oled.drawStr(4, 8, "IR/TSSP  SEM DADOS UART");
+  }
+
+  oled.drawStr(4, 63, "VOLTAR=TESTS");
+  oled.sendBuffer();
+}
+
 void testarMotoresNaTela() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1149,6 +1192,18 @@ void mostrarEmBreve(
     "VOLTAR = MENU"
   );
 
+  oled.sendBuffer();
+}
+
+void mostrarAtaqueAtivo() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(28, 12, "ESTRATEGIA");
+  oled.drawHLine(8, 16, 112);
+  oled.drawStr(36, 32, "ATAQUE ATIVO");
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(18, 48, "ROBO EM OPERACAO");
+  oled.drawStr(27, 61, "VOLTAR = MENU");
   oled.sendBuffer();
 }
 
@@ -1375,8 +1430,13 @@ void IHM_update() {
         }
         break;
       case TELA_ESTRATEGIA:
-        tela = opcaoEstrategia == 0 ? TELA_ATAQUE : TELA_DEFESA;
-        mostrarEmBreve(opcaoEstrategia == 0 ? "ATAQUE" : "DEFESA");
+        estrategiaAtaqueAtiva = opcaoEstrategia == 0;
+        tela = estrategiaAtaqueAtiva ? TELA_ATAQUE : TELA_DEFESA;
+        if (estrategiaAtaqueAtiva) {
+          mostrarAtaqueAtivo();
+        } else {
+          mostrarEmBreve("DEFESA");
+        }
         break;
       case TELA_TELEMETRIA:
         switch (opcaoTelemetria) {
@@ -1427,6 +1487,9 @@ void IHM_update() {
       case TELA_CHECKLIST:
         if (opcaoChecklist == 0) {
           testarBNONaTela();
+        } else if (opcaoChecklist == 1) {
+          tela = TELA_TESTE_TSSP;
+          mostrarTesteTSSP();
         } else if (opcaoChecklist == 2) {
           testarUltraNaTela();
         } else if (opcaoChecklist == 3) {
@@ -1466,6 +1529,9 @@ void IHM_update() {
     } else if (tela == TELA_TESTE_BNO || tela == TELA_TESTE_ULTRA) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
+    } else if (tela == TELA_TESTE_TSSP) {
+      tela = TELA_CHECKLIST;
+      mostrarMenuChecklist();
     } else if (tela == TELA_INFO_TESTE) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
@@ -1483,6 +1549,7 @@ void IHM_update() {
     else if (tela == TELA_INFRA) mostrarInfra();
     else if (tela == TELA_LDR) mostrarLDR();
     else if (tela == TELA_BATERIA) mostrarBateria();
+    else if (tela == TELA_TESTE_TSSP) mostrarTesteTSSP();
     else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();
   }
 
