@@ -397,7 +397,7 @@ void mostrarMenu() {
     "ESTRATEGIA",
     "TELEMETRIA",
     "BATERIA",
-    "CHECKLIST"
+    "TESTS"
   };
 
   oled.setFont(
@@ -632,7 +632,7 @@ void mostrarMenuChecklist() {
   oled.drawStr(
     30,
     10,
-    "CHECKLIST"
+    "TESTS"
   );
 
   oled.drawHLine(
@@ -747,7 +747,7 @@ void testarBNONaTela() {
   oled.drawStr(
     30,
     10,
-    "CHECKLIST"
+    "TESTS"
   );
 
   oled.drawStr(
@@ -782,7 +782,7 @@ void testarBNONaTela() {
   oled.drawStr(
     30,
     9,
-    "CHECKLIST"
+    "TESTS"
   );
 
   oled.drawStr(
@@ -914,7 +914,7 @@ void testarUltraNaTela() {
   oled.drawStr(
     30,
     10,
-    "CHECKLIST"
+    "TESTS"
   );
 
   oled.drawStr(
@@ -950,7 +950,7 @@ void testarUltraNaTela() {
   oled.drawStr(
     30,
     9,
-    "CHECKLIST"
+    "TESTS"
   );
 
   oled.drawStr(
@@ -1071,7 +1071,7 @@ void mostrarInfoTesteChecklist() {
 
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(30, 9, "CHECKLIST");
+  oled.drawStr(30, 9, "TESTS");
   oled.drawHLine(8, 13, 112);
   oled.drawStr(4, 25, NOMES_CHECKLIST[opcaoChecklist]);
 
@@ -1081,14 +1081,14 @@ void mostrarInfoTesteChecklist() {
   if (codigoSecundario[0] != '\0') {
     oled.drawStr(4, 56, codigoSecundario);
   }
-  oled.drawStr(4, 63, "VOLTAR = CHECKLIST");
+  oled.drawStr(4, 63, "VOLTAR = TESTS");
   oled.sendBuffer();
 }
 
 void testarMotoresNaTela() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(30, 9, "CHECKLIST");
+  oled.drawStr(30, 9, "TESTS");
   oled.drawHLine(8, 13, 112);
   oled.drawStr(25, 30, "TESTE MOTORES");
   oled.setFont(u8g2_font_5x8_tr);
