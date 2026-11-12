@@ -11,8 +11,9 @@
 <hr>
 ## Overview
 
-<p>This repository contains the software developed by Stone Wolves for the RoboCup Soccer Infrared 2026 competition.
-The project focuses on the development of autonomous robotic systems capable of detecting the ball, navigating the field, maintaining orientation, and executing movement strategies during matches.
+<p>
+  This repository contains the software developed by Stone Wolves for the RoboCup Soccer Infrared 2026 competition.
+  The project focuses on the development of autonomous robotic systems capable of detecting the ball, navigating the field, maintaining orientation, and executing movement  strategies during matches.
 The firmware is developed primarily in C++ and runs on ESP32-based embedded systems.</p>  
 
 <hr>
