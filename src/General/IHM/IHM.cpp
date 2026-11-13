@@ -5,6 +5,7 @@
 #include <MotoresTeste.h>
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
+#include <LDRFixed.h>
 #include <math.h>
 
 // =====================================================
@@ -60,6 +61,7 @@ enum Tela {
   TELA_ULTRA,
   TELA_INFRA,
   TELA_LDR,
+  TELA_LDR_AJUSTE,
 
   TELA_TESTE_BNO,
   TELA_TESTE_ULTRA,
@@ -103,6 +105,12 @@ bool estrategiaAtaqueAtiva = false;
 
 int opcaoTelemetria = 0;
 const int totalTelemetria = 5;
+const uint8_t totalRegioesLDR = 3;
+const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF"};
+uint16_t limiaresLDR[totalRegioesLDR] = {3332, 1304, 2312};
+int opcaoLDR = 0;
+bool ajustandoLDR = false;
+LDRFixed ldrAjuste;
 
 // 0 = BNO
 // 1 = KICKER
@@ -415,7 +423,7 @@ void mostrarMenu() {
     "ESTRATEGIA",
     "TELEMETRIA",
     "BATERIA",
-    "TESTS"
+    "TESTES"
   };
 
   oled.setFont(
@@ -650,7 +658,7 @@ void mostrarMenuChecklist() {
   oled.drawStr(
     30,
     10,
-    "TESTS"
+    "TESTES"
   );
 
   oled.drawHLine(
@@ -773,7 +781,7 @@ void testarBNONaTela() {
   oled.drawStr(
     30,
     10,
-    "TESTS"
+    "TESTES"
   );
 
   oled.drawStr(
@@ -808,7 +816,7 @@ void testarBNONaTela() {
   oled.drawStr(
     30,
     9,
-    "TESTS"
+    "TESTES"
   );
 
   oled.drawStr(
@@ -940,7 +948,7 @@ void testarUltraNaTela() {
   oled.drawStr(
     30,
     10,
-    "TESTS"
+    "TESTES"
   );
 
   oled.drawStr(
@@ -976,7 +984,7 @@ void testarUltraNaTela() {
   oled.drawStr(
     30,
     9,
-    "TESTS"
+    "TESTES"
   );
 
   oled.drawStr(
@@ -1097,7 +1105,7 @@ void mostrarInfoTesteChecklist() {
 
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(30, 9, "TESTS");
+  oled.drawStr(30, 9, "TESTES");
   oled.drawHLine(8, 13, 112);
   oled.drawStr(4, 25, NOMES_CHECKLIST[opcaoChecklist]);
 
@@ -1107,7 +1115,7 @@ void mostrarInfoTesteChecklist() {
   if (codigoSecundario[0] != '\0') {
     oled.drawStr(4, 56, codigoSecundario);
   }
-  oled.drawStr(4, 63, "VOLTAR = TESTS");
+  oled.drawStr(4, 63, "VOLTAR = TESTES");
   oled.sendBuffer();
 }
 
@@ -1134,14 +1142,14 @@ void mostrarTesteTSSP() {
     oled.drawStr(4, 8, "IR/TSSP  SEM DADOS UART");
   }
 
-  oled.drawStr(4, 63, "VOLTAR=TESTS");
+  oled.drawStr(4, 63, "VOLTAR=TESTES");
   oled.sendBuffer();
 }
 
 void testarMotoresNaTela() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(30, 9, "TESTS");
+  oled.drawStr(30, 9, "TESTES");
   oled.drawHLine(8, 13, 112);
   oled.drawStr(25, 30, "TESTE MOTORES");
   oled.setFont(u8g2_font_5x8_tr);
@@ -1287,6 +1295,18 @@ void mostrarResultadoReset(
   delay(1000);
 }
 
+void sincronizarLimiaresLDRDesdeFirmware() {
+  limiaresLDR[0] = ldrAjuste.getThreshold(LDRFixed::Esquerda);
+  limiaresLDR[1] = ldrAjuste.getThreshold(LDRFixed::Direita);
+  limiaresLDR[2] = ldrAjuste.getThreshold(LDRFixed::Inferior);
+}
+
+void aplicarLimiaresLDRNoFirmware() {
+  ldrAjuste.setThreshold(LDRFixed::Esquerda, limiaresLDR[0]);
+  ldrAjuste.setThreshold(LDRFixed::Direita, limiaresLDR[1]);
+  ldrAjuste.setThreshold(LDRFixed::Inferior, limiaresLDR[2]);
+}
+
 void mostrarLDR() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1303,6 +1323,30 @@ void mostrarLDR() {
   }
 
   oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
+  oled.sendBuffer();
+}
+
+void mostrarLDRAjuste() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(20, 9, "LDR TESTE");
+  oled.drawHLine(8, 13, 112);
+  oled.setFont(u8g2_font_5x8_tr);
+
+  for (uint8_t i = 0; i < totalRegioesLDR; ++i) {
+    const uint8_t y = 24 + i * 12;
+    if (i == opcaoLDR) {
+      oled.drawStr(4, y, ">");
+      if (ajustandoLDR) {
+        oled.drawStr(58, y, "*");
+      }
+    }
+    oled.drawStr(16, y, NOMES_LDR[i]);
+    oled.setCursor(60, y);
+    oled.print(limiaresLDR[i]);
+  }
+
+  oled.drawStr(4, 62, ajustandoLDR ? "SEL +10  MEXER -10" : "MEXER=REGIAO SEL=AJUSTE");
   oled.sendBuffer();
 }
 
@@ -1403,6 +1447,8 @@ void IHM_begin() {
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
+  ldrAjuste.begin();
+  sincronizarLimiaresLDRDesdeFirmware();
   telaCarregamento();
   mostrarMenu();
 }
@@ -1461,6 +1507,15 @@ void IHM_update() {
     } else if (tela == TELA_CHECKLIST) {
       opcaoChecklist = (opcaoChecklist + 1) % totalChecklist;
       mostrarMenuChecklist();
+    } else if (tela == TELA_LDR_AJUSTE) {
+      if (ajustandoLDR) {
+        const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) - 10;
+        limiaresLDR[opcaoLDR] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
+        aplicarLimiaresLDRNoFirmware();
+      } else {
+        opcaoLDR = (opcaoLDR + 1) % totalRegioesLDR;
+      }
+      mostrarLDRAjuste();
     } else if (tela == TELA_INFO_TESTE) {
       mostrarInfoTesteChecklist();
     }
@@ -1542,6 +1597,16 @@ void IHM_update() {
       case TELA_BNO_LEITURA:
         zerarBNO();
         break;
+      case TELA_LDR_AJUSTE:
+        if (ajustandoLDR) {
+          const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) + 10;
+          limiaresLDR[opcaoLDR] = static_cast<uint16_t>(novoValor);
+          aplicarLimiaresLDRNoFirmware();
+        } else {
+          ajustandoLDR = true;
+        }
+        mostrarLDRAjuste();
+        break;
       case TELA_CHECKLIST:
         if (opcaoChecklist == 0) {
           testarBNONaTela();
@@ -1552,6 +1617,12 @@ void IHM_update() {
           testarUltraNaTela();
         } else if (opcaoChecklist == 3) {
           testarMotoresNaTela();
+        } else if (opcaoChecklist == 6) {
+          tela = TELA_LDR_AJUSTE;
+          opcaoLDR = 0;
+          ajustandoLDR = false;
+          sincronizarLimiaresLDRDesdeFirmware();
+          mostrarLDRAjuste();
         } else {
           tela = TELA_INFO_TESTE;
           mostrarInfoTesteChecklist();
@@ -1587,8 +1658,13 @@ void IHM_update() {
       tela = TELA_MENU;
       mostrarMenu();
     } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR) {
+      ajustandoLDR = false;
       tela = TELA_TELEMETRIA;
       mostrarMenuTelemetria();
+    } else if (tela == TELA_LDR_AJUSTE) {
+      ajustandoLDR = false;
+      tela = TELA_CHECKLIST;
+      mostrarMenuChecklist();
     } else if (tela == TELA_TESTE_BNO || tela == TELA_TESTE_ULTRA) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
@@ -1611,6 +1687,7 @@ void IHM_update() {
     else if (tela == TELA_ULTRA) mostrarUltra();
     else if (tela == TELA_INFRA) mostrarInfra();
     else if (tela == TELA_LDR) mostrarLDR();
+    else if (tela == TELA_LDR_AJUSTE) mostrarLDRAjuste();
     else if (tela == TELA_BATERIA) mostrarBateria();
     else if (tela == TELA_TESTE_TSSP) mostrarTesteTSSP();
     else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();

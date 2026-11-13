@@ -22,9 +22,7 @@ const uint8_t CHANNELS_REGIONS[LDRFixed::QuantidadeRegioes][2] = {
 const uint8_t REGION_SENSOR_COUNTS[LDRFixed::QuantidadeRegioes] = {
     9, 2, 2, 2};
 const uint16_t CENTER_THRESHOLDS[CENTER_SENSOR_COUNT] = {
-    2619, 2890, 3699, 1936, 2045, 1876, 2924, 1974, 3647};
-const uint16_t REGION_THRESHOLDS[LDRFixed::QuantidadeRegioes] = {
-    0, 3332, 1304, 2312};
+    2619, 2890, 3699, 1936, 2045, 1776, 2924, 1874, 3647};
 
 void selectMuxChannel(uint8_t channel) {
     digitalWrite(MUX_S0, channel & 0x01);
@@ -43,6 +41,26 @@ void LDRFixed::begin() {
     pinMode(MUX_S3, OUTPUT);
     analogReadResolution(12);
     analogSetPinAttenuation(MUX_SIG, ADC_11db);
+}
+
+void LDRFixed::setThreshold(Regiao regiao, uint16_t limiar) {
+    if (regiao >= Centro && regiao < QuantidadeRegioes) {
+        _thresholds[regiao] = limiar;
+    }
+}
+
+uint16_t LDRFixed::getThreshold(Regiao regiao) const {
+    if (regiao >= Centro && regiao < QuantidadeRegioes) {
+        return _thresholds[regiao];
+    }
+    return 0;
+}
+
+void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
+                            uint16_t inferior) {
+    _thresholds[Esquerda] = esquerda;
+    _thresholds[Direita] = direita;
+    _thresholds[Inferior] = inferior;
 }
 
 uint16_t LDRFixed::lerSensor(uint8_t canal) {
@@ -98,10 +116,10 @@ void LDRFixed::update() {
         }
         const uint16_t media = total / REGION_SENSOR_COUNTS[regiao];
         if (!_classificacaoInicializada) {
-            _regioesBrancas[regiao] = media > REGION_THRESHOLDS[regiao];
+            _regioesBrancas[regiao] = media > _thresholds[regiao];
         }
         classificarAcimaDoLimiar(
-            media, REGION_THRESHOLDS[regiao], _regioesBrancas[regiao]);
+            media, _thresholds[regiao], _regioesBrancas[regiao]);
     }
     _classificacaoInicializada = true;
 }
