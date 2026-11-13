@@ -5,8 +5,13 @@ Ultrassonicos ultrassonicos;
 
 void setup() {
   Serial.begin(115200);
+  const uint32_t inicioEsperaSerial = millis();
+  while (!Serial &&
+         (uint32_t)(millis() - inicioEsperaSerial) < 5000) {
+    delay(10);
+  }
+  Serial.println("Iniciando teste dos sensores ultrassonicos...");
   ultrassonicos.begin();
-
   Serial.println("Teste de 4 sensores HC-SR04 com TRIG compartilhado");
   Serial.print("TRIG: GPIO ");
   Serial.println(Ultrassonicos::PINO_TRIG);

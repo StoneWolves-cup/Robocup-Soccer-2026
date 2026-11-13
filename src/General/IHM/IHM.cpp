@@ -72,6 +72,7 @@ BatteryEstimator estimadorBateria;
 Motores motoresChecklist;
 Omni omniChecklist;
 uint32_t ultimaAtualizacaoBateriaMs = 0;
+uint32_t ultimoLogBateriaMs = 0;
 
 // =====================================================
 // MENU PRINCIPAL
@@ -382,7 +383,8 @@ void telaCarregamento() {
     delay(30);
   }
 
-  delay(150);
+  //define o tempo de exibição do logo do lobo antes de ir para o menu principal
+  delay(100);
 }
 
 // =====================================================
@@ -689,19 +691,27 @@ void mostrarBNO() {
   oled.drawStr(47, 9, "BNO REMOTO");
   oled.setFont(u8g2_font_5x8_tr);
   if (telemetriaBNOValida) {
-    float heading = telemetriaHeading;
-    if (referenciaDefinida) heading = normalizar360(heading - referenciaGraus);
-    oled.drawStr(3, 24, "RUMO:");
+    float rumoRelativo = telemetriaHeading;
+    if (referenciaDefinida) {
+      rumoRelativo = normalizar360(rumoRelativo - referenciaGraus);
+    }
+    oled.drawStr(3, 23, "ANG BNO:");
     oled.setFont(u8g2_font_6x10_tr);
-    oled.setCursor(43, 24);
-    oled.print(heading, 1);
+    oled.setCursor(48, 23);
+    oled.print(telemetriaHeading, 1);
     oled.setFont(u8g2_font_5x8_tr);
-    oled.drawStr(3, 40, "GIRO Z:");
+    oled.drawStr(92, 23, "graus");
+    oled.drawStr(3, 37, "RUMO:");
     oled.setFont(u8g2_font_6x10_tr);
-    oled.setCursor(51, 40);
+    oled.setCursor(43, 37);
+    oled.print(rumoRelativo, 1);
+    oled.setFont(u8g2_font_5x8_tr);
+    oled.drawStr(3, 51, "GIRO Z:");
+    oled.setFont(u8g2_font_6x10_tr);
+    oled.setCursor(51, 51);
     oled.print(telemetriaGyroZ, 1);
     oled.setFont(u8g2_font_5x8_tr);
-    oled.drawStr(90, 40, "graus/s");
+    oled.drawStr(90, 51, "graus/s");
   } else {
     oled.drawStr(15, 32, "SEM DADOS UART");
   }
@@ -1318,36 +1328,63 @@ void mostrarInfra() {
 void mostrarBateria() {
   const float voltage = estimadorBateria.getFilteredVoltage();
   const float percentage = estimadorBateria.getPercentCombined();
+  const float rawVoltage = estimadorBateria.getRawVoltage();
+  const float openCircuitVoltage = estimadorBateria.getOpenCircuitVoltage();
+  const float current = estimadorBateria.getCurrentA();
+  const float voltageSoc = estimadorBateria.getPercentVoltageBased();
+  const float coulombSoc = estimadorBateria.getPercentCoulomb();
+  const float consumedMah = estimadorBateria.getConsumedMah();
   const bool readingValid = isfinite(voltage) && voltage > 0.1f &&
                             isfinite(percentage) &&
                             percentage >= 0.0f && percentage <= 100.0f;
 
   oled.clearBuffer();
-  oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(38, 9, "BATERIA");
-  oled.drawHLine(8, 13, 112);
-
   oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 9, "BATERIA");
+  oled.drawStr(94, 9, "VOLTAR");
+  oled.drawHLine(4, 12, 120);
+
   if (readingValid) {
-    oled.setCursor(12, 27);
-    oled.print("CARGA: ");
+    oled.setCursor(4, 21);
+    oled.print("SOC ");
     oled.print(percentage, 1);
+    oled.print("% V ");
+    oled.print(voltage, 2);
+    oled.print("V");
+
+    oled.setCursor(4, 29);
+    oled.print("Raw ");
+    oled.print(rawVoltage, 2);
+    oled.print(" Filt ");
+    oled.print(voltage, 2);
+    oled.print("V");
+
+    oled.setCursor(4, 37);
+    oled.print("Voc ");
+    oled.print(openCircuitVoltage, 2);
+    oled.print("V I ");
+    oled.print(current, 2);
+    oled.print("A");
+
+    oled.setCursor(4, 45);
+    oled.print("SOCv ");
+    oled.print(voltageSoc, 0);
+    oled.print("% SOCq ");
+    oled.print(coulombSoc, 0);
     oled.print("%");
 
-    oled.setCursor(12, 38);
-    oled.print("TENSAO: ");
-    oled.print(voltage, 2);
-    oled.print(" V");
+    oled.setCursor(4, 53);
+    oled.print("Consumido ");
+    oled.print(consumedMah, 1);
+    oled.print("mAh");
 
-    oled.drawFrame(8, 44, 112, 10);
-    const uint8_t barWidth = static_cast<uint8_t>(percentage * 1.08f);
-    if (barWidth > 0) oled.drawBox(10, 46, barWidth, 6);
+    oled.drawFrame(4, 56, 120, 8);
+    const uint8_t barWidth = static_cast<uint8_t>(percentage * 1.16f);
+    if (barWidth > 0) oled.drawBox(6, 58, barWidth, 4);
   } else {
-    oled.drawStr(16, 29, "LEITURA INVALIDA");
-    oled.drawStr(12, 41, "VERIFIQUE BATERIA");
+    oled.drawStr(16, 32, "LEITURA INVALIDA");
+    oled.drawStr(12, 44, "VERIFIQUE BATERIA");
   }
-
-  oled.drawStr(4, 63, "VOLTAR = MENU");
   oled.sendBuffer();
 }
 
@@ -1357,6 +1394,12 @@ void IHM_begin() {
   pinMode(BOTAO_VOLTAR, INPUT_PULLDOWN);
   estimadorBateria.begin();
   ultimaAtualizacaoBateriaMs = millis();
+  ultimoLogBateriaMs = ultimaAtualizacaoBateriaMs;
+  Serial.println();
+  Serial.println("=== Estimador de bateria iniciado ===");
+  Serial.printf("Tensao inicial: %.3f V | SOC inicial: %.1f %%\n",
+                estimadorBateria.getFilteredVoltage(),
+                estimadorBateria.getPercentCombined());
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
@@ -1378,6 +1421,21 @@ void IHM_update() {
   if (agora - ultimaAtualizacaoBateriaMs >= UPDATE_PERIOD_MS) {
     estimadorBateria.update(agora - ultimaAtualizacaoBateriaMs);
     ultimaAtualizacaoBateriaMs = agora;
+  }
+  if (agora - ultimoLogBateriaMs >= LOG_PERIOD_MS) {
+    ultimoLogBateriaMs = agora;
+
+    Serial.printf(
+        "Vraw=%.3fV  Vfilt=%.3fV  Voc=%.3fV  I=%.3fA  "
+        "SOCv=%.1f%%  SOCq=%.1f%%  SOCcomb=%.1f%%  consumido=%.1fmAh\n",
+        estimadorBateria.getRawVoltage(),
+        estimadorBateria.getFilteredVoltage(),
+        estimadorBateria.getOpenCircuitVoltage(),
+        estimadorBateria.getCurrentA(),
+        estimadorBateria.getPercentVoltageBased(),
+        estimadorBateria.getPercentCoulomb(),
+        estimadorBateria.getPercentCombined(),
+        estimadorBateria.getConsumedMah());
   }
   const bool clicouSelecionar = estadoAnteriorSelecionar == LOW && selecionar == HIGH &&
                                 agora - ultimoSelecionar > DEBOUNCE;
@@ -1521,6 +1579,11 @@ void IHM_update() {
       tela = TELA_MENU_BNO;
       mostrarMenuBNO();
     } else if (tela == TELA_TELEMETRIA || tela == TELA_CHECKLIST) {
+      tela = TELA_MENU;
+      mostrarMenu();
+    } else if (tela == TELA_ESTRATEGIA || tela == TELA_ATAQUE ||
+               tela == TELA_DEFESA) {
+      estrategiaAtaqueAtiva = false;
       tela = TELA_MENU;
       mostrarMenu();
     } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR) {

@@ -5,6 +5,7 @@
 #include <Omni.h>
 #include <Motores.h>
 #include <FuzzyPID.h>
+#include <LDRFixed.h>
 #include <ConfigPinos.h>
 #include <freertos/FreeRTOS.h>
 #include <esp_system.h>
@@ -28,7 +29,7 @@ constexpr uint32_t UART_BAUD = 115200;
 constexpr uint32_t TIMEOUT_PACOTE_MS = 250;
 constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
 constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
-constexpr bool USAR_LDR = false;
+constexpr bool USAR_LDR = true;
 constexpr bool USAR_BNO = true;
 constexpr bool USAR_IR = true;
 constexpr bool USAR_ULTRA = false;
@@ -36,43 +37,28 @@ constexpr bool USAR_ULTRA = false;
 constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
 constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t TIMEOUT_BNO_MS = 250;
-constexpr float POTENCIA_MAXIMA_MOTORES = 0.50f;
-constexpr float VELOCIDADE_CORRECAO_LINHA = 1.0f;
-constexpr float KP_CORRECAO_RUMO = 0.00582f;
-constexpr float KI_CORRECAO_RUMO = 0.0000032f;
-constexpr float KD_CORRECAO_RUMO = 0.00074f;
+constexpr float POTENCIA_MAXIMA_MOTORES = 0.805f;
+constexpr float VELOCIDADE_CORRECAO_LINHA = 0.70f;
+constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 70.0f;
+constexpr float ANGULO_LATERAL_GRAUS = 90.0f;
+constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
+constexpr float ANGULO_MAXIMO_CURVA_GRAUS = 15.0f;
+constexpr float KP_CORRECAO_RUMO = 0.0044f;
+constexpr float KI_CORRECAO_RUMO = 0.0000022f;
+constexpr float KD_CORRECAO_RUMO = 0.0001f;
 constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
 constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
 constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
-constexpr float ROTACAO_MAXIMA_CORRECAO = 0.50f;
+constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
 constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
-constexpr uint8_t LDR_SENSOR_COUNT = 15;
-constexpr uint8_t LDR_REGION_COUNT = 4;
-constexpr uint8_t LDR_MUX_SIG = ConfigPinos::Body::LDR::MUX_SINAL;
-constexpr uint8_t LDR_MUX_S0 = ConfigPinos::Body::LDR::MUX_S0;
-constexpr uint8_t LDR_MUX_S1 = ConfigPinos::Body::LDR::MUX_S1;
-constexpr uint8_t LDR_MUX_S2 = ConfigPinos::Body::LDR::MUX_S2;
-constexpr uint8_t LDR_MUX_S3 = ConfigPinos::Body::LDR::MUX_S3;
-constexpr uint8_t LDR_SAMPLE_COUNT = 12;
-constexpr uint8_t LDR_DISCARD_COUNT = 2;
-constexpr uint8_t LDR_CALIBRATION_SAMPLES = 8;
-constexpr uint8_t LDR_HYSTERESIS_DIVISOR = 8;
-
-enum RegiaoLDR : uint8_t {
-  LDR_CENTRO,
-  LDR_ESQUERDA,
-  LDR_DIREITA,
-  LDR_INFERIOR
-};
-
-const char *const NOMES_REGIOES_LDR[LDR_REGION_COUNT] = {
-    "Centro", "Esquerda", "Direita", "Inferior"};
-const uint8_t CANAIS_REGIOES_LDR[LDR_REGION_COUNT][9] = {
-    {0, 1, 2, 3, 4, 5, 6, 7, 14},
-    {12, 13},
-    {8, 9},
-    {10, 11}};
-const uint8_t CONTAGENS_REGIOES_LDR[LDR_REGION_COUNT] = {9, 2, 2, 2};
+constexpr uint32_t TEMPO_MINIMO_FUGA_LDR_MS = 300;
+constexpr uint32_t TEMPO_LINHA_LIMPA_MS = 120;
+constexpr uint32_t JANELA_CONTINUAR_CORRECAO_LDR_MS = 3000;
+constexpr float MARGEM_DOMINANCIA_LATERAL = 0.001f;
+constexpr uint8_t ULTRA_INDICE_TRASEIRO = 2;  // ECHO3, GPIO13
+constexpr uint8_t ULTRA_INDICE_FRONTAL = 3;   // ECHO4, GPIO14
+constexpr float DISTANCIA_CONTORNO_ULTRA_CM = 10.0f;
+constexpr float ANGULO_CONTORNO_LDR_GRAUS = 45.0f;
 
 struct QuadroRecebido {
   IRActivityPacket pacote;
@@ -129,17 +115,16 @@ uint32_t ultimaMensagemBloqueioMs = 0;
 bool ultimaBolaDetectada = false;
 float ultimaDirecaoBola = 0.0f;
 float ultimaCorrecaoRumo = 0.0f;
-uint16_t referenciaBrancaLDR[LDR_SENSOR_COUNT] = {};
-uint16_t referenciaVerdeLDR[LDR_SENSOR_COUNT] = {};
-uint16_t limiarLDR[LDR_SENSOR_COUNT] = {};
-uint16_t referenciaBrancaRegiaoLDR[LDR_REGION_COUNT] = {};
-uint16_t referenciaVerdeRegiaoLDR[LDR_REGION_COUNT] = {};
-uint16_t limiarRegiaoLDR[LDR_REGION_COUNT] = {};
-bool referenciaBrancaCapturadaLDR = false;
-bool referenciaVerdeCapturadaLDR = false;
-bool brancoAcimaLDR[LDR_REGION_COUNT] = {};
-bool regiaoBrancaLDR[LDR_REGION_COUNT] = {};
-bool sensorBrancoLDR[LDR_SENSOR_COUNT] = {};
+bool fugaLDRAtiva = false;
+bool temporizadorLinhaLimpaAtivo = false;
+uint32_t inicioFugaLDRMs = 0;
+uint32_t inicioLinhaLimpaMs = 0;
+float ultimoVetorFugaX = 0.0f;
+float ultimoVetorFugaY = 0.0f;
+float ultimaCorrecaoPerifericaLDRX = 0.0f;
+float ultimaCorrecaoPerifericaLDRY = 0.0f;
+uint32_t ultimaDeteccaoPerifericaLDRMs = 0;
+bool correcaoPerifericaLDRValida = false;
 constexpr size_t TAMANHO_MAXIMO_PACOTE =
     sizeof(IRActivityPacket) > sizeof(BNODataPacket)
         ? (sizeof(IRActivityPacket) > sizeof(UltraDataPacket)
@@ -151,6 +136,7 @@ size_t bytesNoBufferUART = 0;
 
 Motores motores;
 Omni omni;
+LDRFixed ldrFixed;
 FuzzyPID pidCorrecaoRumo(
     KP_CORRECAO_RUMO, KI_CORRECAO_RUMO, KD_CORRECAO_RUMO,
     -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO,
@@ -426,102 +412,50 @@ bool obterQuadroUltra(UltraDataPacket &destino, uint32_t &recebidoEmMs) {
   return disponivel;
 }
 
-void selecionarCanalLDR(uint8_t canal) {
-  digitalWrite(LDR_MUX_S0, canal & 0x01);
-  digitalWrite(LDR_MUX_S1, (canal >> 1) & 0x01);
-  digitalWrite(LDR_MUX_S2, (canal >> 2) & 0x01);
-  digitalWrite(LDR_MUX_S3, (canal >> 3) & 0x01);
-  delayMicroseconds(10);
-}
-
-uint16_t lerSensorLDR(uint8_t canal) {
-  selecionarCanalLDR(canal);
-  for (uint8_t i = 0; i < LDR_DISCARD_COUNT; ++i) analogRead(LDR_MUX_SIG);
-
-  uint32_t total = 0;
-  for (uint8_t i = 0; i < LDR_SAMPLE_COUNT; ++i) {
-    total += analogRead(LDR_MUX_SIG);
-    delayMicroseconds(100);
-  }
-  return total / LDR_SAMPLE_COUNT;
-}
-
-void capturarReferenciaLDR(uint16_t referencia[LDR_SENSOR_COUNT]) {
-  for (uint8_t sensor = 0; sensor < LDR_SENSOR_COUNT; ++sensor) {
-    uint32_t total = 0;
-    for (uint8_t amostra = 0; amostra < LDR_CALIBRATION_SAMPLES; ++amostra) {
-      total += lerSensorLDR(sensor);
-      delay(2);
-    }
-    referencia[sensor] = total / LDR_CALIBRATION_SAMPLES;
-  }
-}
-
-void prepararClassificacaoLDR() {
-  for (uint8_t sensor = 0; sensor < LDR_SENSOR_COUNT; ++sensor) {
-    limiarLDR[sensor] =
-        (referenciaBrancaLDR[sensor] + referenciaVerdeLDR[sensor]) / 2;
-    sensorBrancoLDR[sensor] =
-        referenciaBrancaLDR[sensor] >= referenciaVerdeLDR[sensor];
-  }
-
-  for (uint8_t regiao = 0; regiao < LDR_REGION_COUNT; ++regiao) {
-    uint32_t totalBranco = 0;
-    uint32_t totalVerde = 0;
-    uint32_t totalLimiar = 0;
-    for (uint8_t i = 0; i < CONTAGENS_REGIOES_LDR[regiao]; ++i) {
-      const uint8_t canal = CANAIS_REGIOES_LDR[regiao][i];
-      totalBranco += referenciaBrancaLDR[canal];
-      totalVerde += referenciaVerdeLDR[canal];
-      totalLimiar += limiarLDR[canal];
-    }
-
-    const uint8_t quantidade = CONTAGENS_REGIOES_LDR[regiao];
-    referenciaBrancaRegiaoLDR[regiao] = totalBranco / quantidade;
-    referenciaVerdeRegiaoLDR[regiao] = totalVerde / quantidade;
-    limiarRegiaoLDR[regiao] = totalLimiar / quantidade;
-    brancoAcimaLDR[regiao] =
-        referenciaBrancaRegiaoLDR[regiao] >= referenciaVerdeRegiaoLDR[regiao];
-    regiaoBrancaLDR[regiao] = brancoAcimaLDR[regiao];
-  }
-}
-
-bool processarComandosLDR() {
-  bool comandoExecutado = false;
-  while (Serial.available() > 0) {
-    const char comando = Serial.read();
-    if (comando == 'w' || comando == 'W') {
-      comandoExecutado = true;
-      motores.parar();
-      Serial.println("Capturando referencia branca; mantenha os LDRs sobre branco.");
-      capturarReferenciaLDR(referenciaBrancaLDR);
-      referenciaBrancaCapturadaLDR = true;
-      if (referenciaVerdeCapturadaLDR) prepararClassificacaoLDR();
-      Serial.println("Referencia branca LDR capturada.");
-    } else if (comando == 'g' || comando == 'G') {
-      comandoExecutado = true;
-      motores.parar();
-      Serial.println("Capturando referencia verde; mantenha os LDRs sobre verde.");
-      capturarReferenciaLDR(referenciaVerdeLDR);
-      referenciaVerdeCapturadaLDR = true;
-      if (referenciaBrancaCapturadaLDR) prepararClassificacaoLDR();
-      Serial.println("Referencia verde LDR capturada.");
-    } else if (comando == 'r' || comando == 'R') {
-      comandoExecutado = true;
-      motores.parar();
-      referenciaBrancaCapturadaLDR = false;
-      referenciaVerdeCapturadaLDR = false;
-      Serial.println("Calibracao LDR reiniciada; motores permanecem parados.");
-    }
-  }
-  return comandoExecutado;
-}
-
 float erroAngular(float desejado, float atual) {
   float erro = desejado - atual;
   while (erro > 180.0f) erro -= 360.0f;
   while (erro < -180.0f) erro += 360.0f;
   return erro;
+}
+
+float normalizarAngulo360(float anguloGraus) {
+  anguloGraus = fmodf(anguloGraus, 360.0f);
+  return anguloGraus < 0.0f ? anguloGraus + 360.0f : anguloGraus;
+}
+
+bool bolaNoSetorFrontal(float anguloGraus) {
+  const float angulo360 = normalizarAngulo360(anguloGraus);
+  return angulo360 >= 360.0f - ANGULO_SETOR_FRONTAL_GRAUS ||
+         angulo360 <= ANGULO_SETOR_FRONTAL_GRAUS;
+}
+
+float calcularAnguloMovimentoJ(float anguloBolaGraus) {
+  const float anguloAssinado = erroAngular(anguloBolaGraus, 0.0f);
+  const float magnitudeBola = fabsf(anguloAssinado);
+  float magnitudeMovimento;
+
+  if (magnitudeBola <= ANGULO_SETOR_FRONTAL_GRAUS) {
+    magnitudeMovimento =
+        magnitudeBola * ANGULO_TRASEIRO_GRAUS /
+        ANGULO_SETOR_FRONTAL_GRAUS;
+  } else if (magnitudeBola <= ANGULO_LATERAL_GRAUS) {
+    const float progressoCurva =
+        (magnitudeBola - ANGULO_SETOR_FRONTAL_GRAUS) /
+        (ANGULO_LATERAL_GRAUS - ANGULO_SETOR_FRONTAL_GRAUS);
+    magnitudeMovimento =
+        ANGULO_TRASEIRO_GRAUS -
+        ANGULO_MAXIMO_CURVA_GRAUS * progressoCurva;
+  } else {
+    const float progressoTraseiro =
+        (magnitudeBola - ANGULO_LATERAL_GRAUS) /
+        (ANGULO_TRASEIRO_GRAUS - ANGULO_LATERAL_GRAUS);
+    magnitudeMovimento =
+        ANGULO_TRASEIRO_GRAUS +
+        ANGULO_MAXIMO_CURVA_GRAUS * progressoTraseiro;
+  }
+
+  return copysignf(magnitudeMovimento, anguloAssinado);
 }
 
 float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ) {
@@ -549,6 +483,167 @@ void aplicarRodas(float x, float y, float rotacao) {
                   comando.m4 * POTENCIA_MAXIMA_MOTORES);
 }
 
+bool vetorBloqueadoPeloLDR(float x, float y) {
+  if (ldrFixed.regiaoBranca(LDRFixed::Centro)) return true;
+  const bool movimentoLateral =
+      fabsf(x) > fabsf(y) + MARGEM_DOMINANCIA_LATERAL;
+  if (movimentoLateral && x > 0.0f &&
+      ldrFixed.regiaoBranca(LDRFixed::Esquerda)) return true;
+  if (movimentoLateral && x < 0.0f &&
+      ldrFixed.regiaoBranca(LDRFixed::Direita)) return true;
+  if (y < 0.0f && ldrFixed.regiaoBranca(LDRFixed::Inferior)) return true;
+  return false;
+}
+
+bool calcularContornoLDR(float anguloGraus, const UltraDataPacket &ultra,
+                         bool ultraRecente, float &anguloContornoGraus) {
+  if (!USAR_ULTRA || !ultraRecente) return false;
+
+  const float anguloRad = anguloGraus * DEG_TO_RAD;
+  const float xOriginal = sinf(anguloRad);
+  const float yOriginal = cosf(anguloRad);
+  const bool movimentoLateral =
+      fabsf(xOriginal) > fabsf(yOriginal) + MARGEM_DOMINANCIA_LATERAL;
+  const bool lateralBloqueado =
+      movimentoLateral &&
+      ((xOriginal > 0.0f && ldrFixed.regiaoBranca(LDRFixed::Esquerda)) ||
+       (xOriginal < 0.0f && ldrFixed.regiaoBranca(LDRFixed::Direita)));
+  if (!lateralBloqueado) return false;
+
+  const bool frenteValida =
+      ultra.validMask & (1U << ULTRA_INDICE_FRONTAL);
+  const bool traseiraValida =
+      ultra.validMask & (1U << ULTRA_INDICE_TRASEIRO);
+  const bool frenteProxima = frenteValida &&
+      ultra.distanceCm[ULTRA_INDICE_FRONTAL] < DISTANCIA_CONTORNO_ULTRA_CM;
+  const bool traseiraProxima = traseiraValida &&
+      ultra.distanceCm[ULTRA_INDICE_TRASEIRO] < DISTANCIA_CONTORNO_ULTRA_CM;
+  if (frenteProxima == traseiraProxima) return false;
+
+  const float deslocamentoGraus = frenteProxima
+      ? -ANGULO_CONTORNO_LDR_GRAUS
+      : ANGULO_CONTORNO_LDR_GRAUS;
+  const float candidatoGraus = anguloGraus + deslocamentoGraus;
+  const float candidatoRad = candidatoGraus * DEG_TO_RAD;
+  const float xCandidato = sinf(candidatoRad);
+  const float yCandidato = cosf(candidatoRad);
+  if (vetorBloqueadoPeloLDR(xCandidato, yCandidato)) return false;
+
+  anguloContornoGraus = candidatoGraus;
+  return true;
+}
+
+bool calcularVetorFugaLDR(float &x, float &y, bool &centroDetectado,
+                          bool &periferiaDetectada, float &periferiaX,
+                          float &periferiaY) {
+  x = 0.0f;
+  y = 0.0f;
+  centroDetectado = ldrFixed.regiaoBranca(LDRFixed::Centro);
+  periferiaDetectada = false;
+  periferiaX = 0.0f;
+  periferiaY = 0.0f;
+  bool brancoDetectado = false;
+
+  if (centroDetectado) {
+    y -= VELOCIDADE_CORRECAO_LINHA;
+    brancoDetectado = true;
+  }
+  if (ldrFixed.regiaoBranca(LDRFixed::Esquerda)) {
+    x -= VELOCIDADE_CORRECAO_LINHA;
+    periferiaX -= VELOCIDADE_CORRECAO_LINHA;
+    periferiaDetectada = true;
+    brancoDetectado = true;
+  }
+  if (ldrFixed.regiaoBranca(LDRFixed::Direita)) {
+    x += VELOCIDADE_CORRECAO_LINHA;
+    periferiaX += VELOCIDADE_CORRECAO_LINHA;
+    periferiaDetectada = true;
+    brancoDetectado = true;
+  }
+  if (ldrFixed.regiaoBranca(LDRFixed::Inferior)) {
+    y += VELOCIDADE_CORRECAO_LINHA;
+    periferiaY += VELOCIDADE_CORRECAO_LINHA;
+    periferiaDetectada = true;
+    brancoDetectado = true;
+  }
+  return brancoDetectado;
+}
+
+void aplicarMemoriaCorrecaoLDR(bool centroDetectado,
+                               bool periferiaDetectada, float periferiaX,
+                               float periferiaY, float &x, float &y,
+                               uint32_t agoraMs) {
+  if (periferiaDetectada &&
+      (periferiaX != 0.0f || periferiaY != 0.0f)) {
+    ultimaCorrecaoPerifericaLDRX = periferiaX;
+    ultimaCorrecaoPerifericaLDRY = periferiaY;
+    ultimaDeteccaoPerifericaLDRMs = agoraMs;
+    correcaoPerifericaLDRValida = true;
+  }
+
+  if (!centroDetectado) return;
+
+  const bool memoriaRecente = correcaoPerifericaLDRValida &&
+      (uint32_t)(agoraMs - ultimaDeteccaoPerifericaLDRMs) <=
+          JANELA_CONTINUAR_CORRECAO_LDR_MS;
+  if (memoriaRecente) {
+    x = ultimaCorrecaoPerifericaLDRX;
+    y = ultimaCorrecaoPerifericaLDRY;
+  }
+}
+
+bool atualizarFugaLDR(bool linhaDetectada, float x, float y,
+                      uint32_t agoraMs) {
+  if (linhaDetectada) {
+    if (!fugaLDRAtiva) {
+      fugaLDRAtiva = true;
+      inicioFugaLDRMs = agoraMs;
+      Serial.println("Fuga LDR ativada; aguardando sensores indicarem linha limpa.");
+    }
+    ultimoVetorFugaX = x;
+    ultimoVetorFugaY = y;
+    temporizadorLinhaLimpaAtivo = false;
+    return true;
+  }
+
+  if (!fugaLDRAtiva) return false;
+
+  if (!temporizadorLinhaLimpaAtivo) {
+    inicioLinhaLimpaMs = agoraMs;
+    temporizadorLinhaLimpaAtivo = true;
+  }
+
+  const bool tempoMinimoCumprido =
+      (uint32_t)(agoraMs - inicioFugaLDRMs) >= TEMPO_MINIMO_FUGA_LDR_MS;
+  const bool linhaLimpaEstavel =
+      (uint32_t)(agoraMs - inicioLinhaLimpaMs) >= TEMPO_LINHA_LIMPA_MS;
+  if (tempoMinimoCumprido && linhaLimpaEstavel) {
+    fugaLDRAtiva = false;
+    temporizadorLinhaLimpaAtivo = false;
+    Serial.println("Fuga LDR encerrada; retomando perseguicao.");
+    return false;
+  }
+
+  return true;
+}
+
+const char *nomeMotivoReset(esp_reset_reason_t motivo) {
+  switch (motivo) {
+    case ESP_RST_UNKNOWN: return "desconhecido";
+    case ESP_RST_POWERON: return "ligacao/alimentacao";
+    case ESP_RST_EXT: return "pino externo";
+    case ESP_RST_SW: return "reinicio por software";
+    case ESP_RST_PANIC: return "panic/crash";
+    case ESP_RST_INT_WDT: return "watchdog de interrupcao";
+    case ESP_RST_TASK_WDT: return "watchdog de tarefa";
+    case ESP_RST_WDT: return "watchdog";
+    case ESP_RST_DEEPSLEEP: return "retorno de deep sleep";
+    case ESP_RST_BROWNOUT: return "brownout/tensao baixa";
+    case ESP_RST_SDIO: return "SDIO";
+    default: return "motivo nao mapeado";
+  }
+}
+
 void imprimirDadosIR(const IRActivityPacket &pacote) {
   if (USAR_BNO && pacote.ballDetected) {
     Serial.printf("Direcao da bola: %.1f graus | Angulo BNO: %.1f graus\n",
@@ -574,21 +669,29 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao,
     return;
   }
 
-  const float anguloRad = anguloGraus * DEG_TO_RAD;
-  const float x = sinf(anguloRad) * VELOCIDADE_CORRECAO_LINHA;
-  const float y = cosf(anguloRad) * VELOCIDADE_CORRECAO_LINHA;
+  const bool emCurva = !bolaNoSetorFrontal(anguloGraus);
+  const float anguloMovimentoGraus =
+      calcularAnguloMovimentoJ(anguloGraus);
+  const float anguloMovimentoRad = anguloMovimentoGraus * DEG_TO_RAD;
+  const float x = sinf(anguloMovimentoRad) * VELOCIDADE_CORRECAO_LINHA;
+  const float y = cosf(anguloMovimentoRad) * VELOCIDADE_CORRECAO_LINHA;
 
   if (imprimirDiagnostico) {
     if (USAR_BNO) {
       Serial.printf(
-          "Perseguindo bola por IR: direcao=%.1f graus | vetor=(%.3f, %.3f) | "
-          "rumo=%.1f graus | rotacao=%.3f\n",
-          anguloGraus, x, y, ultimoPacoteBNO.headingDegrees, rotacao);
+          "Perseguindo bola por IR: direcao=%.1f graus | modo=%s | "
+          "movimento=%.1f graus | vetor=(%.3f, %.3f) | rumo=%.1f graus | "
+          "alvoRumoFixo=%.1f graus | rotacao=%.3f\n",
+          normalizarAngulo360(anguloGraus),
+          emCurva ? "curva-J" : "captura", anguloMovimentoGraus,
+          x, y, ultimoPacoteBNO.headingDegrees, rumoDesejadoGraus, rotacao);
     } else {
       Serial.printf(
-          "Perseguindo bola por IR: direcao=%.1f graus | "
-          "vetor=(%.3f, %.3f) | rotacao=%.3f\n",
-          anguloGraus, x, y, rotacao);
+          "Perseguindo bola por IR: direcao=%.1f graus | modo=%s | "
+          "movimento=%.1f graus | vetor=(%.3f, %.3f) | rotacao=%.3f\n",
+          normalizarAngulo360(anguloGraus),
+          emCurva ? "curva-J" : "captura", anguloMovimentoGraus, x, y,
+          rotacao);
     }
   }
 
@@ -601,8 +704,9 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao,
 void setup() {
   rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
   Serial.begin(USB_SERIAL_BAUD);
-  Serial.printf("Motivo do reset: %d\n",
-                static_cast<int>(esp_reset_reason()));
+  const esp_reset_reason_t motivoReset = esp_reset_reason();
+  Serial.printf("Motivo do reset: %d (%s)\n", static_cast<int>(motivoReset),
+                nomeMotivoReset(motivoReset));
   const size_t tamanhoBufferUARTConfigurado =
       Serial1.setRxBufferSize(TAMANHO_BUFFER_RX_UART);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
@@ -611,13 +715,7 @@ void setup() {
   motores.begin();
   motores.parar();
   if (USAR_LDR) {
-    pinMode(LDR_MUX_SIG, INPUT);
-    pinMode(LDR_MUX_S0, OUTPUT);
-    pinMode(LDR_MUX_S1, OUTPUT);
-    pinMode(LDR_MUX_S2, OUTPUT);
-    pinMode(LDR_MUX_S3, OUTPUT);
-    analogReadResolution(12);
-    analogSetPinAttenuation(LDR_MUX_SIG, ADC_11db);
+    ldrFixed.begin();
   }
   Serial.println("Iniciando IHM.");
   IHM_begin();
@@ -637,7 +735,7 @@ void setup() {
                 USAR_ULTRA ? "ligado" : "desligado",
                 USAR_LDR ? "ligado" : "desligado");
   Serial.println(USAR_LDR
-      ? "LDR habilitado: calibra com 'w' (branco) e 'g' (verde)."
+      ? "LDR habilitado: classificacao por limiares fixos e histerese."
       : "LDR desativado.");
 }
 
@@ -646,10 +744,9 @@ void loop() {
   atualizarLedUART();
   imprimirDiagnosticoUART();
   IHM_update();
-  if (USAR_LDR) IHM_atualizarLDR(regiaoBrancaLDR);
-  if (USAR_LDR && processarComandosLDR()) {
-    motores.parar();
-    return;
+  if (USAR_LDR) {
+    ldrFixed.update();
+    IHM_atualizarLDR(ldrFixed.regioesBrancas());
   }
 
   BNODataPacket pacoteBNO{};
@@ -719,6 +816,57 @@ void loop() {
 
   if (!IHM_estrategiaAtaqueAtiva() || IHM_testeTSSPAtivo()) {
     motores.parar();
+    return;
+  }
+
+  float xFugaLDR = 0.0f;
+  float yFugaLDR = 0.0f;
+  bool centroDetectado = false;
+  bool periferiaDetectada = false;
+  float periferiaX = 0.0f;
+  float periferiaY = 0.0f;
+  const bool linhaDetectada =
+      USAR_LDR && calcularVetorFugaLDR(
+                      xFugaLDR, yFugaLDR, centroDetectado,
+                      periferiaDetectada, periferiaX, periferiaY);
+  if (linhaDetectada) {
+    aplicarMemoriaCorrecaoLDR(
+        centroDetectado, periferiaDetectada, periferiaX, periferiaY,
+        xFugaLDR, yFugaLDR, agora);
+  }
+  if (atualizarFugaLDR(linhaDetectada, xFugaLDR, yFugaLDR, agora)) {
+    const bool irRecente = USAR_IR && pacoteInicialRecebido &&
+        (uint32_t)(agora - ultimoRecebimentoMs) <= TIMEOUT_PACOTE_MS;
+    const bool bnoPronto = !USAR_BNO ||
+        (bnoTelemetriaValida && referenciaRumoDefinida);
+    float anguloContornoGraus = ultimaDirecaoBola;
+    if (linhaDetectada && !centroDetectado && irRecente && bnoPronto &&
+        ultimaBolaDetectada &&
+        calcularContornoLDR(ultimaDirecaoBola, ultimoPacoteUltra,
+                            ultraTelemetriaValida, anguloContornoGraus)) {
+      if (quadroNovo) {
+        Serial.printf(
+            "Contorno LDR via ultrassom: direcao IR %.1f -> %.1f graus\n",
+            normalizarAngulo360(ultimaDirecaoBola),
+            normalizarAngulo360(anguloContornoGraus));
+        ultimaCorrecaoRumo = USAR_BNO
+            ? calcularCorrecaoRumo(
+                  ultimaBolaDetectada, ultimoPacoteBNO.headingDegrees,
+                  ultimoPacoteBNO.gyroZDegreesPerSecond)
+            : 0.0f;
+      }
+      informarMovimentoLiberado();
+      decidirMovimento(ultimaBolaDetectada, anguloContornoGraus,
+                       ultimaCorrecaoRumo, quadroNovo);
+      return;
+    }
+
+    if (quadroNovo) {
+      Serial.printf("Fuga da linha por LDR: vetor=(%.3f, %.3f)\n",
+                    ultimoVetorFugaX, ultimoVetorFugaY);
+    }
+    informarMovimentoLiberado();
+    aplicarRodas(ultimoVetorFugaX, ultimoVetorFugaY, 0.0f);
     return;
   }
 

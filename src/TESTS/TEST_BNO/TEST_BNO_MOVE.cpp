@@ -12,12 +12,12 @@ constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t TIMEOUT_EMISSOR_MS = 300;
 constexpr uint32_t INTERVALO_TELEMETRIA_MS = 100;
 
-constexpr float KP_INICIAL = 0.0056f;
-constexpr float KI_INICIAL = 0.0000030f;
-constexpr float KD_INICIAL = 0.00070f;
+constexpr float KP_INICIAL = 0.0044f;
+constexpr float KI_INICIAL = 0.0000022f;
+constexpr float KD_INICIAL = 0.0001f;
 constexpr float LIMITE_INTEGRAL = 300.0f;
-constexpr float ZONA_MORTA_GRAUS = 2.0f;
-constexpr float ROTACAO_MAXIMA = 0.850f;
+constexpr float ZONA_MORTA_GRAUS = 0.70f;
+constexpr float ROTACAO_MAXIMA = 0.86f;
 constexpr float PASSO_ROTACAO = 0.006f;
 constexpr float PASSO_KP = 0.0002f;
 constexpr float PASSO_KI = 0.0000005f;

@@ -16,18 +16,6 @@ constexpr uint8_t MUX_S2 = ConfigPinos::Teste::LDR8::MUX_S2;
 // Quantidade de LDRs
 constexpr uint8_t SENSOR_COUNT = 8;
 
-// LEDs dos sensores
-constexpr uint8_t LED_PINS[SENSOR_COUNT] = {
-    ConfigPinos::Teste::LDR8::LEDS[0],
-    ConfigPinos::Teste::LDR8::LEDS[1],
-    ConfigPinos::Teste::LDR8::LEDS[2],
-    ConfigPinos::Teste::LDR8::LEDS[3],
-    ConfigPinos::Teste::LDR8::LEDS[4],
-    ConfigPinos::Teste::LDR8::LEDS[5],
-    ConfigPinos::Teste::LDR8::LEDS[6],
-    ConfigPinos::Teste::LDR8::LEDS[7]
-};
-
 // Quantidade de leituras para fazer média
 constexpr uint8_t SAMPLE_COUNT = 12;
 
@@ -208,12 +196,6 @@ void setup()
     pinMode(MUX_S1, OUTPUT);
     pinMode(MUX_S2, OUTPUT);
 
-    // LEDs ligados permanentemente
-    for (uint8_t led = 0; led < SENSOR_COUNT; ++led)
-    {
-        pinMode(LED_PINS[led], OUTPUT);
-        digitalWrite(LED_PINS[led], HIGH);
-    }
     // ADC do ESP32
     analogReadResolution(12);
 

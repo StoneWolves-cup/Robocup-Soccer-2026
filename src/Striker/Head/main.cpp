@@ -3,6 +3,7 @@
 #include <IRProtocol.h>
 #include <BNO055.h>
 #include <TSSP.h>
+#include <Ultrassonicos.h>
 #include <ConfigPinos.h>
 
 namespace {
@@ -11,6 +12,7 @@ constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
 constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 50;
+constexpr uint32_t INTERVALO_ULTRA_MS = 100;
 constexpr uint32_t USB_SERIAL_BAUD = 460800;
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
@@ -44,6 +46,9 @@ TSSP sensorTSSP;
 bool bnoDisponivel = false;
 uint32_t ultimaAtualizacaoBNO = 0;
 uint32_t ultimaTentativaBNO = 0;
+uint32_t ultimaLeituraUltra = 0;
+uint16_t sequenciaUltra = 0;
+Ultrassonicos sensorUltrassonicos;
 
 // Copiada do TEST_TSSP/TSSP_16_test.cpp para manter o mesmo calculo vetorial.
 void calcularDirecao() {
@@ -131,6 +136,23 @@ void transmitirBNO() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
+void transmitirUltra() {
+  float distanciasCm[Ultrassonicos::QUANTIDADE] = {};
+  bool leiturasValidas[Ultrassonicos::QUANTIDADE] = {};
+  sensorUltrassonicos.ler(distanciasCm, leiturasValidas);
+
+  UltraDataPacket pacote{};
+  pacote.magic = ULTRA_PACKET_MAGIC;
+  pacote.version = ULTRA_PACKET_VERSION;
+  pacote.sequence = sequenciaUltra++;
+  for (uint8_t i = 0; i < Ultrassonicos::QUANTIDADE; ++i) {
+    pacote.distanceCm[i] = distanciasCm[i];
+    if (leiturasValidas[i]) pacote.validMask |= 1U << i;
+  }
+  pacote.checksum = ultraPacketChecksum(pacote);
+  Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
+}
+
 void iniciarBNO() {
   Serial.println("Tentando inicializar BNO055...");
   bnoDisponivel = sensorBNO.begin(BNO_SDA_PIN, BNO_SCL_PIN);
@@ -171,6 +193,7 @@ void setup() {
 
   iniciarBNO();
   sensorTSSP.begin();
+  sensorUltrassonicos.begin();
   Serial.println("Coroa TSSP4038 - 16 sensores");
   Serial.println(
       "Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP ativo. "
@@ -190,6 +213,10 @@ void loop() {
       (uint32_t)(agoraMs - ultimaAtualizacaoBNO) >= INTERVALO_BNO_MS) {
     ultimaAtualizacaoBNO = agoraMs;
     sensorBNO.update();
+  }
+  if ((uint32_t)(agoraMs - ultimaLeituraUltra) >= INTERVALO_ULTRA_MS) {
+    ultimaLeituraUltra = agoraMs;
+    transmitirUltra();
   }
   if ((uint32_t)(agoraMs - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
     ultimoEnvio = agoraMs;
