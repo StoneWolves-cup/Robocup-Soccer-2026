@@ -16,12 +16,17 @@ public:
     void begin();
     void update();
 
+    void setThreshold(Regiao regiao, uint16_t limiar);
+    uint16_t getThreshold(Regiao regiao) const;
+    void setThresholds(uint16_t esquerda, uint16_t direita, uint16_t inferior);
+
     bool regiaoBranca(Regiao regiao) const;
     const bool *regioesBrancas() const;
 
 private:
     static constexpr uint8_t SENSOR_COUNT = 15;
 
+    uint16_t _thresholds[QuantidadeRegioes] = {0, 3332, 1304, 2312};
     bool _regioesBrancas[QuantidadeRegioes] = {};
     bool _sensoresCentroBrancos[SENSOR_COUNT] = {};
     bool _classificacaoInicializada = false;
