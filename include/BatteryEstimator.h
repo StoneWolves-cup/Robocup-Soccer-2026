@@ -20,8 +20,8 @@
 // Divisor de tensão: Vadc = Vbat * R2 / (R1 + R2)
 // Valores de exemplo (ajuste para o seu circuito real e confira a faixa
 // segura de entrada do ADC do seu ESP32 antes de ligar a bateria).
-#define DIVIDER_R1_OHM      100000.0f
-#define DIVIDER_R2_OHM      33000.0f
+#define DIVIDER_R1_OHM      10000.0f
+#define DIVIDER_R2_OHM      36000.0f
 
 // Sensor de corrente (ex: ACS712-05B): sensibilidade em V/A e offset em V
 // no ponto de corrente zero. Ajuste conforme o datasheet/calibração real.

@@ -63,7 +63,7 @@ namespace ConfigPinos {
         namespace TSSP {
         // Ordem dos sensores na coroa, do índice 0 em diante no sentido horário.
             constexpr uint8_t PINOS[16] = {
-                1, 42, 41, 40, 39, 38, 48, 47, 21, 16, 17, 7, 6, 5, 4, 2
+                1, 42, 41, 40, 39, 38, 48, 47, 21, 16, 15, 7, 6, 5, 4, 2
             };
         }  // namespace TSSP
     }  // namespace Head
@@ -83,7 +83,6 @@ namespace ConfigPinos {
             constexpr uint8_t MUX_S0 = 25;
             constexpr uint8_t MUX_S1 = 26;
             constexpr uint8_t MUX_S2 = 27;
-            constexpr uint8_t LEDS[8] = {4, 5, 18, 19, 21, 22, 23, 32};
         }  // namespace LDR8
 
         namespace TSSP2 {
