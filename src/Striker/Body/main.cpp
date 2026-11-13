@@ -12,6 +12,7 @@
 
 void IHM_begin();
 void IHM_update();
+void IHM_conectarLDR(LDRFixed *ldr);
 void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido,
                              const float distanciasUltra[4], uint8_t mascaraUltra,
@@ -32,12 +33,12 @@ constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
 constexpr bool USAR_LDR = true;
 constexpr bool USAR_BNO = true;
 constexpr bool USAR_IR = true;
-constexpr bool USAR_ULTRA = false;
+constexpr bool USAR_ULTRA = true;
 // GPIOs reservados para a UART, fora dos pinos atuais de motores e da IHM.
 constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
 constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint32_t TIMEOUT_BNO_MS = 250;
-constexpr float POTENCIA_MAXIMA_MOTORES = 0.805f;
+constexpr float POTENCIA_MAXIMA_MOTORES = 0.77f;
 constexpr float VELOCIDADE_CORRECAO_LINHA = 0.70f;
 constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 70.0f;
 constexpr float ANGULO_LATERAL_GRAUS = 90.0f;
@@ -45,7 +46,7 @@ constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
 constexpr float ANGULO_MAXIMO_CURVA_GRAUS = 15.0f;
 constexpr float KP_CORRECAO_RUMO = 0.0044f;
 constexpr float KI_CORRECAO_RUMO = 0.0000022f;
-constexpr float KD_CORRECAO_RUMO = 0.0001f;
+constexpr float KD_CORRECAO_RUMO = 0.00012f;
 constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
 constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
 constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
@@ -57,7 +58,7 @@ constexpr uint32_t JANELA_CONTINUAR_CORRECAO_LDR_MS = 3000;
 constexpr float MARGEM_DOMINANCIA_LATERAL = 0.001f;
 constexpr uint8_t ULTRA_INDICE_TRASEIRO = 2;  // ECHO3, GPIO13
 constexpr uint8_t ULTRA_INDICE_FRONTAL = 3;   // ECHO4, GPIO14
-constexpr float DISTANCIA_CONTORNO_ULTRA_CM = 10.0f;
+constexpr float DISTANCIA_CONTORNO_ULTRA_CM = 15.0f;
 constexpr float ANGULO_CONTORNO_LDR_GRAUS = 45.0f;
 
 struct QuadroRecebido {
@@ -716,6 +717,7 @@ void setup() {
   motores.parar();
   if (USAR_LDR) {
     ldrFixed.begin();
+    IHM_conectarLDR(&ldrFixed);
   }
   Serial.println("Iniciando IHM.");
   IHM_begin();

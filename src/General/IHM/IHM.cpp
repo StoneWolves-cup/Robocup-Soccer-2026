@@ -6,6 +6,7 @@
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
 #include <LDRFixed.h>
+#include <Preferences.h>
 #include <math.h>
 
 // =====================================================
@@ -110,7 +111,19 @@ const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF"};
 uint16_t limiaresLDR[totalRegioesLDR] = {3332, 1304, 2312};
 int opcaoLDR = 0;
 bool ajustandoLDR = false;
-LDRFixed ldrAjuste;
+LDRFixed *ldrThresholdTarget = nullptr;
+Preferences preferenciasLDR;
+bool preferenciasLDRDisponiveis = false;
+
+struct ConfiguracaoLimiaresLDR {
+  uint16_t versao;
+  uint16_t esquerda;
+  uint16_t direita;
+  uint16_t inferior;
+};
+
+constexpr uint16_t VERSAO_CONFIG_LDR = 1;
+constexpr uint16_t LIMIAR_LDR_MAXIMO = 4095;
 
 // 0 = BNO
 // 1 = KICKER
@@ -1295,16 +1308,54 @@ void mostrarResultadoReset(
   delay(1000);
 }
 
-void sincronizarLimiaresLDRDesdeFirmware() {
-  limiaresLDR[0] = ldrAjuste.getThreshold(LDRFixed::Esquerda);
-  limiaresLDR[1] = ldrAjuste.getThreshold(LDRFixed::Direita);
-  limiaresLDR[2] = ldrAjuste.getThreshold(LDRFixed::Inferior);
+void aplicarLimiaresLDRNoFirmware() {
+  if (ldrThresholdTarget == nullptr) {
+    return;
+  }
+  ldrThresholdTarget->setThresholds(
+      limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
 }
 
-void aplicarLimiaresLDRNoFirmware() {
-  ldrAjuste.setThreshold(LDRFixed::Esquerda, limiaresLDR[0]);
-  ldrAjuste.setThreshold(LDRFixed::Direita, limiaresLDR[1]);
-  ldrAjuste.setThreshold(LDRFixed::Inferior, limiaresLDR[2]);
+void salvarLimiaresLDR() {
+  if (!preferenciasLDRDisponiveis) {
+    Serial.println("ERRO: preferencias LDR indisponiveis; limiares nao salvos.");
+    return;
+  }
+
+  const ConfiguracaoLimiaresLDR config = {
+      VERSAO_CONFIG_LDR, limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]};
+  if (preferenciasLDR.putBytes("thresholds", &config, sizeof(config)) !=
+      sizeof(config)) {
+    Serial.println("ERRO: falha ao salvar limiares LDR no NVS.");
+  }
+}
+
+void carregarLimiaresLDR() {
+  if (!preferenciasLDR.begin("ldr-config", false)) {
+    Serial.println("ERRO: nao foi possivel abrir preferencias LDR no NVS.");
+    return;
+  }
+  preferenciasLDRDisponiveis = true;
+
+  ConfiguracaoLimiaresLDR config{};
+  if (preferenciasLDR.getBytesLength("thresholds") == sizeof(config) &&
+      preferenciasLDR.getBytes("thresholds", &config, sizeof(config)) ==
+          sizeof(config) &&
+      config.versao == VERSAO_CONFIG_LDR &&
+      config.esquerda <= LIMIAR_LDR_MAXIMO &&
+      config.direita <= LIMIAR_LDR_MAXIMO &&
+      config.inferior <= LIMIAR_LDR_MAXIMO) {
+    limiaresLDR[0] = config.esquerda;
+    limiaresLDR[1] = config.direita;
+    limiaresLDR[2] = config.inferior;
+  } else {
+    Serial.println(
+        "NVS sem limiares LDR validos; usando padroes 3332/1304/2312.");
+  }
+}
+
+void IHM_conectarLDR(LDRFixed *ldr) {
+  ldrThresholdTarget = ldr;
 }
 
 void mostrarLDR() {
@@ -1447,8 +1498,8 @@ void IHM_begin() {
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
-  ldrAjuste.begin();
-  sincronizarLimiaresLDRDesdeFirmware();
+  carregarLimiaresLDR();
+  aplicarLimiaresLDRNoFirmware();
   telaCarregamento();
   mostrarMenu();
 }
@@ -1512,6 +1563,7 @@ void IHM_update() {
         const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) - 10;
         limiaresLDR[opcaoLDR] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
         aplicarLimiaresLDRNoFirmware();
+        salvarLimiaresLDR();
       } else {
         opcaoLDR = (opcaoLDR + 1) % totalRegioesLDR;
       }
@@ -1600,8 +1652,11 @@ void IHM_update() {
       case TELA_LDR_AJUSTE:
         if (ajustandoLDR) {
           const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) + 10;
-          limiaresLDR[opcaoLDR] = static_cast<uint16_t>(novoValor);
-          aplicarLimiaresLDRNoFirmware();
+          if (novoValor <= LIMIAR_LDR_MAXIMO) {
+            limiaresLDR[opcaoLDR] = static_cast<uint16_t>(novoValor);
+            aplicarLimiaresLDRNoFirmware();
+            salvarLimiaresLDR();
+          }
         } else {
           ajustandoLDR = true;
         }
@@ -1621,7 +1676,6 @@ void IHM_update() {
           tela = TELA_LDR_AJUSTE;
           opcaoLDR = 0;
           ajustandoLDR = false;
-          sincronizarLimiaresLDRDesdeFirmware();
           mostrarLDRAjuste();
         } else {
           tela = TELA_INFO_TESTE;
