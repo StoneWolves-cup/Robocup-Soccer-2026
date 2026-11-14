@@ -107,7 +107,7 @@ void LDRFixed::update() {
             ++sensoresCentroBrancos;
         }
     }
-    _regioesBrancas[Centro] = sensoresCentroBrancos >= 2;
+    _regioesBrancas[Centro] = sensoresCentroBrancos >= 1;
 
     for (uint8_t regiao = Esquerda; regiao < QuantidadeRegioes; ++regiao) {
         uint32_t total = 0;

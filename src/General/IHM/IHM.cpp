@@ -96,6 +96,7 @@ const int totalMenu = 4;
 int opcaoEstrategia = 0;
 const int totalEstrategia = 2;
 bool estrategiaAtaqueAtiva = false;
+bool modoRoboDefesa = false;
 
 // 0 = ATAQUE
 // 1 = DEFESA
@@ -270,6 +271,14 @@ bool IHM_testeTSSPAtivo() {
 
 bool IHM_estrategiaAtaqueAtiva() {
   return estrategiaAtaqueAtiva;
+}
+
+void IHM_configurarRoboDefesa() {
+  modoRoboDefesa = true;
+}
+
+bool IHM_estrategiaDefesaAtiva() {
+  return modoRoboDefesa && tela == TELA_DEFESA;
 }
 
 // =====================================================
@@ -1226,12 +1235,12 @@ void mostrarEmBreve(
   oled.sendBuffer();
 }
 
-void mostrarAtaqueAtivo() {
+void mostrarEstrategiaAtiva(const char *nome) {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
   oled.drawStr(28, 12, "ESTRATEGIA");
   oled.drawHLine(8, 16, 112);
-  oled.drawStr(36, 32, "ATAQUE ATIVO");
+  oled.drawStr(36, 32, nome);
   oled.setFont(u8g2_font_5x8_tr);
   oled.drawStr(18, 48, "ROBO EM OPERACAO");
   oled.drawStr(27, 61, "VOLTAR = MENU");
@@ -1595,12 +1604,14 @@ void IHM_update() {
         }
         break;
       case TELA_ESTRATEGIA:
-        estrategiaAtaqueAtiva = opcaoEstrategia == 0;
-        tela = estrategiaAtaqueAtiva ? TELA_ATAQUE : TELA_DEFESA;
+        estrategiaAtaqueAtiva = opcaoEstrategia == 0 && !modoRoboDefesa;
+        tela = opcaoEstrategia == 0 ? TELA_ATAQUE : TELA_DEFESA;
         if (estrategiaAtaqueAtiva) {
-          mostrarAtaqueAtivo();
+          mostrarEstrategiaAtiva("ATAQUE ATIVO");
+        } else if (modoRoboDefesa && tela == TELA_DEFESA) {
+          mostrarEstrategiaAtiva("DEFESA ATIVA");
         } else {
-          mostrarEmBreve("DEFESA");
+          mostrarEmBreve(tela == TELA_ATAQUE ? "ATAQUE" : "DEFESA");
         }
         break;
       case TELA_TELEMETRIA:
