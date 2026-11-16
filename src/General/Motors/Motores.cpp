@@ -17,6 +17,7 @@ Motores::Motores()
 // BEGIN
 // ============================================================
 
+// Coloca todos os pinos em saida e aplica estado seguro antes do primeiro comando.
 void Motores::begin()
 {
     pinMode(M1_PWM, OUTPUT);
@@ -44,6 +45,7 @@ void Motores::begin()
 // MOTOR INDIVIDUAL
 // ============================================================
 
+// Converte comando com sinal em sentido do TB6612 e magnitude PWM.
 void Motores::controlarMotor(
     uint8_t en,
     uint8_t in1,
@@ -57,6 +59,7 @@ void Motores::controlarMotor(
     // PARADO
     // --------------------------------------------------------
 
+    // A zona morta evita PWM residual por ruido numerico e reduz aquecimento.
     if (fabs(comando) < zonaMorta)
     {
         digitalWrite(en, LOW);
@@ -106,6 +109,7 @@ void Motores::controlarMotor(
 // DEFINIR OS 4 MOTORES
 // ============================================================
 
+// Aplica a mistura omnidirecional; os fatores INV compensam a montagem eletrica.
 void Motores::definir(
     float m1,
     float m2,
@@ -150,6 +154,7 @@ void Motores::definir(
 // PARAR
 // ============================================================
 
+// Para todas as rodas sem depender do estado ou do ultimo valor de PWM.
 void Motores::parar()
 {
     digitalWrite(M1_PWM, LOW);

@@ -21,6 +21,9 @@ const uint8_t CHANNELS_REGIONS[LDRFixed::QuantidadeRegioes][2] = {
     {0, 1}, {12, 13}, {8, 9}, {10, 11}};
 const uint8_t REGION_SENSOR_COUNTS[LDRFixed::QuantidadeRegioes] = {
     9, 2, 2, 2};
+
+// Atualiza os bits do multiplexador e aguarda assentamento eletrico do canal
+// antes do ADC, evitando que a conversao ainda reflita o canal anterior.
 void selectMuxChannel(uint8_t channel) {
     digitalWrite(MUX_S0, channel & 0x01);
     digitalWrite(MUX_S1, (channel >> 1) & 0x01);
@@ -35,6 +38,7 @@ LDRFixed::LDRFixed(const ConfigLDR::Limiares &limiares) {
     setCenterSensorThresholds(limiares.centro, limiares.histereseCentro);
 }
 
+// Inicializa o ADC na resolucao e faixa usadas pelos limiares calibrados.
 void LDRFixed::begin() {
     pinMode(MUX_SIG, INPUT);
     pinMode(MUX_S0, OUTPUT);
@@ -45,12 +49,14 @@ void LDRFixed::begin() {
     analogSetPinAttenuation(MUX_SIG, ADC_11db);
 }
 
+// Evita escrever fora do vetor quando recebe um enum invalido.
 void LDRFixed::setThreshold(Regiao regiao, uint16_t limiar) {
     if (regiao >= Centro && regiao < QuantidadeRegioes) {
         _thresholds[regiao] = limiar;
     }
 }
 
+// Retorna zero para enum invalido para manter a leitura segura.
 uint16_t LDRFixed::getThreshold(Regiao regiao) const {
     if (regiao >= Centro && regiao < QuantidadeRegioes) {
         return _thresholds[regiao];
@@ -58,6 +64,15 @@ uint16_t LDRFixed::getThreshold(Regiao regiao) const {
     return 0;
 }
 
+// Retorna zero para enum invalido, sem acessar fora do vetor de medias.
+uint16_t LDRFixed::getAverage(Regiao regiao) const {
+    if (regiao >= Centro && regiao < QuantidadeRegioes) {
+        return _averages[regiao];
+    }
+    return 0;
+}
+
+// Atualiza somente as regioes perifericas para preservar configuracao do centro.
 void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
                             uint16_t inferior) {
     _thresholds[Esquerda] = esquerda;
@@ -65,6 +80,8 @@ void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
     _thresholds[Inferior] = inferior;
 }
 
+// Copia valores para o objeto, evitando depender do tempo de vida do array
+// fornecido pela configuracao de perfil.
 void LDRFixed::setCenterSensorThresholds(const uint16_t limiares[9],
                                          uint16_t margemHisterese) {
     for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i) {
@@ -73,6 +90,14 @@ void LDRFixed::setCenterSensorThresholds(const uint16_t limiares[9],
     _centerHysteresisMargin = margemHisterese;
 }
 
+// Ao trocar perfil, a primeira amostra deve ser classificada sem herdar o
+// estado branco/verde anterior, que foi obtido com outros limiares.
+void LDRFixed::resetClassification() {
+    _classificacaoInicializada = false;
+}
+
+// Faz varias conversoes por canal; as primeiras sao descartadas por causa do
+// tempo de assentamento do multiplexador e as restantes sao mediadas.
 uint16_t LDRFixed::lerSensor(uint8_t canal) {
     selectMuxChannel(canal);
     for (uint8_t i = 0; i < DISCARD_COUNT; ++i) {
@@ -87,18 +112,31 @@ uint16_t LDRFixed::lerSensor(uint8_t canal) {
     return total / SAMPLE_COUNT;
 }
 
-bool LDRFixed::classificarAcimaDoLimiar(uint16_t leitura, uint16_t limiar,
-                                        bool &branco,
-                                        uint16_t margemHisterese) const {
-    if (static_cast<uint32_t>(leitura) >
-        static_cast<uint32_t>(limiar) + margemHisterese) {
-        branco = true;
-    } else if (static_cast<uint32_t>(leitura) + margemHisterese < limiar) {
-        branco = false;
+// Mantem o estado anterior dentro da faixa morta; a margem impede alternancias
+// rapidas causadas por ruido quando a leitura fica junto ao limiar.
+bool LDRFixed::classificarLimiar(uint16_t leitura, uint16_t limiar,
+                                bool &branco, uint16_t margemHisterese,
+                                bool brancoAcimaDoLimiar) const {
+    if (brancoAcimaDoLimiar) {
+        if (static_cast<uint32_t>(leitura) >
+            static_cast<uint32_t>(limiar) + margemHisterese) {
+            branco = true;
+        } else if (static_cast<uint32_t>(leitura) + margemHisterese < limiar) {
+            branco = false;
+        }
+    } else {
+        if (static_cast<uint32_t>(leitura) + margemHisterese < limiar) {
+            branco = true;
+        } else if (static_cast<uint32_t>(leitura) >
+                   static_cast<uint32_t>(limiar) + margemHisterese) {
+            branco = false;
+        }
     }
     return branco;
 }
 
+// Atualiza o conjunto completo como uma unica rodada: centro e periferia usam
+// medias/limiares proprios para tolerar variacao entre sensores e placas.
 void LDRFixed::update() {
     uint16_t leituras[SENSOR_COUNT];
     for (uint8_t sensor = 0; sensor < SENSOR_COUNT; ++sensor) {
@@ -112,9 +150,10 @@ void LDRFixed::update() {
             _sensoresCentroBrancos[canal] =
                 leituras[canal] > _centerSensorThresholds[i];
         }
-        if (classificarAcimaDoLimiar(
+        if (classificarLimiar(
                 leituras[canal], _centerSensorThresholds[i],
-                _sensoresCentroBrancos[canal], _centerHysteresisMargin)) {
+                _sensoresCentroBrancos[canal], _centerHysteresisMargin,
+                true)) {
             ++sensoresCentroBrancos;
         }
     }
@@ -126,20 +165,19 @@ void LDRFixed::update() {
             total += leituras[CHANNELS_REGIONS[regiao][i]];
         }
         const uint16_t media = total / REGION_SENSOR_COUNTS[regiao];
-        if (!_classificacaoInicializada) {
-            _regioesBrancas[regiao] = media > _thresholds[regiao];
-        }
-        classificarAcimaDoLimiar(
-            media, _thresholds[regiao], _regioesBrancas[regiao],
-            HYSTERESIS_MARGIN);
+        _averages[regiao] = media;
+        _regioesBrancas[regiao] = media > _thresholds[regiao];
     }
     _classificacaoInicializada = true;
 }
 
+// Consulta apenas o ultimo resultado, deixando o controle de amostragem ao loop.
 bool LDRFixed::regiaoBranca(Regiao regiao) const {
     return _regioesBrancas[regiao];
 }
 
+// Expõe o snapshot para telemetria sem copiar o vetor; o chamador nao deve
+// guardar o ponteiro atraves de uma proxima atualizacao.
 const bool *LDRFixed::regioesBrancas() const {
     return _regioesBrancas;
 }

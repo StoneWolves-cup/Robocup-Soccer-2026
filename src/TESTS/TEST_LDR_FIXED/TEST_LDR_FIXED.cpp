@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Motores.h>
 
 constexpr uint8_t SENSOR_COUNT = 15;
 constexpr uint8_t REGION_COUNT = 3;
@@ -11,22 +12,25 @@ constexpr uint8_t MUX_S3 = 13;
 constexpr uint8_t SAMPLE_COUNT = 12;
 constexpr uint8_t ADC_DISCARD_COUNT = 2;
 constexpr uint16_t HYSTERESIS_MARGIN = 80;
+constexpr float LINE_CORRECTION_SPEED = 0.70f;
 
 const char *const REGION_NAMES[REGION_COUNT] = {
     "Esquerda", "Direita", "Inferior"};
 const uint8_t REGION_CHANNELS[REGION_COUNT][2] = {
     {12, 13}, {8, 9}, {10, 11}};
 const uint16_t REGION_THRESHOLDS[REGION_COUNT] = {
-    3332, 1304, 2312};
+    178, 400, 305};
 
 const uint8_t CENTER_SENSOR_CHANNELS[CENTER_SENSOR_COUNT] = {
     0, 1, 2, 3, 4, 5, 6, 7, 14};
 const uint16_t CENTER_SENSOR_THRESHOLDS[CENTER_SENSOR_COUNT] = {
-    2619, 2890, 3699, 1936, 2045, 1876, 2924, 1974, 3647};
+    406, 248, 379, 252, 349, 85, 297, 113, 140};
 
 bool regionIsWhite[REGION_COUNT] = {};
 bool centerSensorIsWhite[CENTER_SENSOR_COUNT] = {};
 bool classificationInitialized = false;
+Motores motors;
+Omni omni;
 
 void selectMuxChannel(uint8_t channel)
 {
@@ -60,17 +64,25 @@ uint16_t averageRegion(uint8_t region, const uint16_t readings[SENSOR_COUNT])
     return total / 2;
 }
 
-bool classifyWhiteAboveThreshold(
-    uint16_t value, uint16_t threshold, bool &isWhite)
+bool classifyWhiteAtThreshold(
+    uint16_t value, uint16_t threshold, bool &isWhite,
+    bool whiteAboveThreshold = true)
 {
-    if (static_cast<uint32_t>(value) >
-        static_cast<uint32_t>(threshold) + HYSTERESIS_MARGIN)
-    {
-        isWhite = true;
-    }
-    else if (static_cast<uint32_t>(value) + HYSTERESIS_MARGIN < threshold)
-    {
-        isWhite = false;
+    if (whiteAboveThreshold) {
+        if (static_cast<uint32_t>(value) >
+            static_cast<uint32_t>(threshold) + HYSTERESIS_MARGIN) {
+            isWhite = true;
+        } else if (static_cast<uint32_t>(value) + HYSTERESIS_MARGIN <
+                   threshold) {
+            isWhite = false;
+        }
+    } else {
+        if (static_cast<uint32_t>(value) + HYSTERESIS_MARGIN < threshold) {
+            isWhite = true;
+        } else if (static_cast<uint32_t>(value) >
+                   static_cast<uint32_t>(threshold) + HYSTERESIS_MARGIN) {
+            isWhite = false;
+        }
     }
     return isWhite;
 }
@@ -84,12 +96,47 @@ void initializeClassification(const uint16_t readings[SENSOR_COUNT])
             CENTER_SENSOR_THRESHOLDS[i];
     }
 
-    for (uint8_t region = 0; region < REGION_COUNT; ++region)
-    {
-        regionIsWhite[region] =
-            averageRegion(region, readings) > REGION_THRESHOLDS[region];
-    }
     classificationInitialized = true;
+}
+
+void correctLine(bool centerIsWhite)
+{
+    float x = 0.0f;
+    float y = 0.0f;
+    bool whiteDetected = false;
+
+    if (centerIsWhite)
+    {
+        y -= LINE_CORRECTION_SPEED;
+        whiteDetected = true;
+    }
+    if (regionIsWhite[0])
+    {
+        x -= LINE_CORRECTION_SPEED;
+        whiteDetected = true;
+    }
+    if (regionIsWhite[1])
+    {
+        x += LINE_CORRECTION_SPEED;
+        whiteDetected = true;
+    }
+    if (regionIsWhite[2])
+    {
+        y += LINE_CORRECTION_SPEED;
+        whiteDetected = true;
+    }
+
+    if (!whiteDetected || (x == 0.0f && y == 0.0f))
+    {
+        motors.parar();
+        return;
+    }
+
+    const ComandosMotores commands = omni.calcular(x, y, 0.0f);
+    motors.definir(commands.m1 * LINE_CORRECTION_SPEED,
+                   commands.m2 * LINE_CORRECTION_SPEED,
+                   commands.m3 * LINE_CORRECTION_SPEED,
+                   commands.m4 * LINE_CORRECTION_SPEED);
 }
 
 void printReadings()
@@ -112,7 +159,7 @@ void printReadings()
     uint8_t whiteCenterSensors = 0;
     for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i)
     {
-        if (classifyWhiteAboveThreshold(
+        if (classifyWhiteAtThreshold(
                 readings[CENTER_SENSOR_CHANNELS[i]],
                 CENTER_SENSOR_THRESHOLDS[i],
                 centerSensorIsWhite[i]))
@@ -129,11 +176,13 @@ void printReadings()
     Serial.print("/9; limiar de votacao: 2)");
 
     Serial.print(" || Regioes: ");
+    bool whiteDetected = centerIsWhite;
     for (uint8_t region = 0; region < REGION_COUNT; ++region)
     {
         const uint16_t average = averageRegion(region, readings);
-        const bool isWhite = classifyWhiteAboveThreshold(
-            average, REGION_THRESHOLDS[region], regionIsWhite[region]);
+        const bool isWhite = average > REGION_THRESHOLDS[region];
+        regionIsWhite[region] = isWhite;
+        whiteDetected = whiteDetected || isWhite;
 
         Serial.print(REGION_NAMES[region]);
         Serial.print(": ");
@@ -146,12 +195,17 @@ void printReadings()
         if (region + 1 < REGION_COUNT)
             Serial.print(" | ");
     }
+    correctLine(centerIsWhite);
+    Serial.print(" || Correcao: ");
+    Serial.print(whiteDetected ? "afastando da linha" : "parado");
     Serial.println();
 }
 
 void setup()
 {
     Serial.begin(115200);
+    motors.begin();
+    motors.parar();
     pinMode(MUX_SIG, INPUT);
     pinMode(MUX_S0, OUTPUT);
     pinMode(MUX_S1, OUTPUT);
@@ -162,7 +216,8 @@ void setup()
     analogSetPinAttenuation(MUX_SIG, ADC_11db);
 
     Serial.println("Teste LDR com limiares fixos - 15 LDRs / CD4067BM / ESP32-S3");
-    Serial.println("Branco = leitura acima do limiar; histerese = 80 ADC.");
+    Serial.println("Regioes: branco = media acima do limiar, sem histerese.");
+    Serial.println("Centro: branco acima do limiar; histerese = 80 ADC.");
     Serial.println("Centro: C0-C7/C14, voto branco com pelo menos 2 de 9 sensores.");
     Serial.println("Centro por canal:");
     for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i)
@@ -175,7 +230,8 @@ void setup()
             Serial.print(" | ");
     }
     Serial.println();
-    Serial.println("Regioes fixas: esquerda=3332, direita=1304, inferior=2312.");
+    Serial.println("Regioes: esquerda=178, direita=400, inferior=305.");
+    Serial.println("Corrige afastando-se do branco; sem deteccao, mantem motores parados.");
     Serial.println("Sem calibracao w/g; altere os valores constantes no firmware.");
 }
 

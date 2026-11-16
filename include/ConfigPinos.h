@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 namespace ConfigPinos {
+    // Mapa central de GPIO: alteracoes de placa devem ser feitas aqui para
+    // manter drivers e firmwares consistentes com a ligacao eletrica.
     namespace Geral {
         namespace UART1 {
             constexpr int RX = 18;

@@ -11,6 +11,7 @@ public:
   static const uint8_t PINOS[NUM_SENSORES];
 
   TSSP();
+  // Configura entradas dos receptores e inicia a janela de amostragem.
   void begin();
 
   // Amostra continuamente. Retorna true ao encerrar uma janela de 5 ms.

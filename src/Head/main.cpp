@@ -1,3 +1,5 @@
+// Firmware do Head compartilhado pelos dois robos: concentra aquisicao e
+// publicacao dos sensores, enquanto o Body escolhe e executa a estrategia.
 #include <Arduino.h>
 #include <math.h>
 #include <IRProtocol.h>
@@ -8,12 +10,15 @@
 
 namespace {
 constexpr uint8_t NUM_SENSORES = IR_SENSOR_COUNT;
+// Ritmos independentes evitam que leitura do sonar limite o fluxo IR mais rapido.
 constexpr uint32_t SERIAL_MS = 100;
 constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
 constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 50;
 constexpr uint32_t INTERVALO_ULTRA_MS = 100;
 constexpr uint32_t USB_SERIAL_BAUD = 460800;
+// ALPHA controla suavizacao da direcao; limiar elimina atividade de fundo antes
+// da soma vetorial e confianca rejeita deteccoes difusas no anel.
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
@@ -50,7 +55,9 @@ uint32_t ultimaLeituraUltra = 0;
 uint16_t sequenciaUltra = 0;
 Ultrassonicos sensorUltrassonicos;
 
-// Copiada do TEST_TSSP/TSSP_16_test.cpp para manter o mesmo calculo vetorial.
+// Soma as atividades acima do ruido como vetores na circunferencia. O filtro
+// exponencial estabiliza a direcao; a razao modulo/soma estima a concentracao
+// espacial e rejeita leituras distribuidas que nao indicam um rumo confiavel.
 void calcularDirecao() {
   float x = 0.0f;
   float y = 0.0f;
@@ -96,6 +103,8 @@ void calcularDirecao() {
   bolaDetectada = true;
 }
 
+// Copia o snapshot da ultima janela TSSP antes de calcular o rumo que sera
+// publicado; a janela so muda quando o driver informa que ela foi fechada.
 void atualizarAtividadeTSSP() {
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
     atividade[i] = sensorTSSP.atividadePercentual(i);
@@ -104,6 +113,8 @@ void atualizarAtividadeTSSP() {
   calcularDirecao();
 }
 
+// Serializa atividade e decisao IR no formato comum do protocolo; o checksum
+// permite ao Body descartar quadros corrompidos antes de usar a direcao.
 void transmitirIR() {
   IRActivityPacket pacote{};
   pacote.magic = IR_PACKET_MAGIC;
@@ -123,6 +134,8 @@ void transmitirIR() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
+// So publica telemetria BNO depois da inicializacao bem-sucedida, evitando
+// enviar zeros que poderiam parecer uma orientacao valida ao Body.
 void transmitirBNO() {
   if (!bnoDisponivel) return;
 
@@ -136,6 +149,8 @@ void transmitirBNO() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
+// Publica distancias e mascara por sensor: ausencia de eco nao e codificada
+// como distancia zero, pois zero seria interpretado como obstaculo proximo.
 void transmitirUltra() {
   float distanciasCm[Ultrassonicos::QUANTIDADE] = {};
   bool leiturasValidas[Ultrassonicos::QUANTIDADE] = {};
@@ -153,6 +168,8 @@ void transmitirUltra() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
+// Tenta iniciar o sensor e registra o horario mesmo em caso de falha para
+// limitar a frequencia de novas tentativas e manter o loop responsivo.
 void iniciarBNO() {
   Serial.println("Tentando inicializar BNO055...");
   bnoDisponivel = sensorBNO.begin(BNO_SDA_PIN, BNO_SCL_PIN);
@@ -168,6 +185,7 @@ void iniciarBNO() {
   }
 }
 
+// Emite diagnostico legivel para bancada sem alterar os quadros enviados ao Body.
 void imprimirDados() {
   Serial.print("LOW%: ");
   for (uint8_t i = 0; i < NUM_SENSORES; i++) {
@@ -187,6 +205,7 @@ void imprimirDados() {
 }
 } // namespace
 
+// Configura canais seriais e inicializa sensores antes de habilitar a telemetria.
 void setup() {
   Serial.begin(USB_SERIAL_BAUD);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
@@ -200,6 +219,8 @@ void setup() {
       "Telemetria BNO055 sera enviada apos inicializacao do sensor.");
 }
 
+// Agenda amostragem, atualizacao e transmissao por intervalos independentes;
+// assim a leitura IR continua responsiva sem bloquear pelo ciclo mais lento do ultra.
 void loop() {
   if (sensorTSSP.atualizar()) atualizarAtividadeTSSP();
 

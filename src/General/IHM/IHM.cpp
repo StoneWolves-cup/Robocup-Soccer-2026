@@ -1,5 +1,4 @@
 #include <Wire.h>
-#include <SPI.h>
 #include <U8g2lib.h>
 #include <BatteryEstimator.h>
 #include <MotoresTeste.h>
@@ -95,8 +94,7 @@ const int totalMenu = 4;
 
 int opcaoEstrategia = 0;
 const int totalEstrategia = 2;
-bool estrategiaAtaqueAtiva = false;
-bool modoRoboDefesa = false;
+uint8_t perfilLDRAtual = 0;
 
 // 0 = ATAQUE
 // 1 = DEFESA
@@ -117,6 +115,8 @@ bool ajustandoLDR = false;
 LDRFixed *ldrThresholdTarget = nullptr;
 Preferences preferenciasLDR;
 bool preferenciasLDRDisponiveis = false;
+bool erroLimiaresLDR = false;
+bool erroPerfilLDR = false;
 
 struct ConfiguracaoLimiaresLDR {
   uint16_t versao;
@@ -204,6 +204,8 @@ bool lerBotaoEstavel(
   unsigned long &ultimaMudanca
 ) {
 
+  // Memoriza a ultima borda e so muda o estado logico depois que o sinal
+  // permanece estavel; isso evita multiplos comandos causados pelo bounce.
   bool leituraAtual = digitalRead(pino);
   unsigned long agora = millis();
 
@@ -242,6 +244,8 @@ bool telemetriaIRValida = false;
 bool telemetriaBolaDetectada = false;
 bool telemetriaRegiaoBrancaLDR[4] = {};
 
+// Recebe um snapshot do Body para a IHM nao acoplar a renderizacao aos drivers
+// UART/sensores. Flags de validade distinguem "zero medido" de "sem pacote".
 void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido, const float distanciasUltra[4],
                              uint8_t mascaraUltra, bool ultraValido,
@@ -261,29 +265,24 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
   telemetriaIRValida = irValido;
 }
 
+// Copia estados LDR para exibi-los sem reamostrar hardware dentro da IHM.
 void IHM_atualizarLDR(const bool regioesBrancas[4]) {
   for (uint8_t i = 0; i < 4; ++i) {
     telemetriaRegiaoBrancaLDR[i] = regioesBrancas[i];
   }
 }
 
+// O Body consulta estas funcoes no loop para decidir qual maquina de estados roda.
 bool IHM_testeTSSPAtivo() {
   return tela == TELA_TESTE_TSSP;
 }
 
 bool IHM_estrategiaAtaqueAtiva() {
-  return estrategiaAtaqueAtiva;
-}
-
-void IHM_configurarRoboDefesa() {
-  modoRoboDefesa = true;
-  limiaresLDR[0] = ConfigLDR::Defesa.esquerda;
-  limiaresLDR[1] = ConfigLDR::Defesa.direita;
-  limiaresLDR[2] = ConfigLDR::Defesa.inferior;
+  return tela == TELA_ATAQUE;
 }
 
 bool IHM_estrategiaDefesaAtiva() {
-  return modoRoboDefesa && tela == TELA_DEFESA;
+  return tela == TELA_DEFESA;
 }
 
 // =====================================================
@@ -334,6 +333,7 @@ const uint8_t logoLobo[] PROGMEM = {
 // NORMALIZA 0 - 360
 // =====================================================
 
+// Normaliza angulos para exibicao e comparacoes de rumo sem valores negativos.
 float normalizar360(float valor) {
 
   while (valor >= 360.0) {
@@ -351,6 +351,7 @@ float normalizar360(float valor) {
 // CARREGAMENTO
 // =====================================================
 
+// Apresenta a inicializacao da interface antes de liberar o menu principal.
 void telaCarregamento() {
 
   for (
@@ -426,6 +427,7 @@ void telaCarregamento() {
 // MENU PRINCIPAL
 // =====================================================
 
+// Renderizadores mantem desenho isolado da logica de botoes e do firmware.
 void mostrarMenu() {
 
   oled.clearBuffer();
@@ -489,6 +491,7 @@ void mostrarMenu() {
 // MENU ESTRATEGIA
 // =====================================================
 
+// Mostra as duas estrategias; a execucao ocorre no Body apos confirmacao.
 void mostrarMenuEstrategia() {
 
   oled.clearBuffer();
@@ -548,6 +551,7 @@ void mostrarMenuEstrategia() {
 // MENU TELEMETRIA
 // =====================================================
 
+// Lista paginas de diagnostico alimentadas pelos snapshots UART mais recentes.
 void mostrarMenuTelemetria() {
 
   oled.clearBuffer();
@@ -610,6 +614,7 @@ void mostrarMenuTelemetria() {
 // MENU BNO
 // =====================================================
 
+// Oferece leitura, definicao de zero relativo e verificacao de comunicacao BNO.
 void mostrarMenuBNO() {
 
   oled.clearBuffer();
@@ -674,6 +679,7 @@ void mostrarMenuBNO() {
 // MENU CHECKLIST
 // =====================================================
 
+// Desloca a janela visivel para manter o item selecionado dentro do OLED.
 void mostrarMenuChecklist() {
 
   oled.clearBuffer();
@@ -720,6 +726,8 @@ void mostrarMenuChecklist() {
 // MOSTRAR BNO
 // =====================================================
 
+// Exibe valores somente quando a telemetria esta marcada valida, evitando
+// apresentar valores antigos/zerados como se fossem leituras atuais.
 void mostrarBNO() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -758,6 +766,7 @@ void mostrarBNO() {
 // ZERO BNO
 // =====================================================
 
+// Captura a leitura remota atual como referencia apenas se o pacote for valido.
 void zerarBNO() {
   if (telemetriaBNOValida) {
     referenciaGraus = telemetriaHeading;
@@ -778,14 +787,11 @@ void zerarBNO() {
 // STATUS DO BNO RECEBIDO PELO HEAD
 // =====================================================
 
-bool verificarBNO() {
-  return telemetriaBNOValida;
-}
-
 // =====================================================
 // TESTE DO BNO
 // =====================================================
 
+// Mantem o teste alinhado a mesma condicao de validade usada na tela BNO.
 bool testarBNO() {
   return telemetriaBNOValida;
 }
@@ -794,6 +800,7 @@ bool testarBNO() {
 // TESTE BNO NA TELA
 // =====================================================
 
+// Mostra resultado de comunicacao observada pelo Body sem reiniciar o sensor.
 void testarBNONaTela() {
 
   tela =
@@ -918,6 +925,8 @@ void testarBNONaTela() {
 // HC-SR04 / ULTRA
 // =====================================================
 
+// Seleciona o menor eco valido para o checklist; mascara e frescor evitam usar
+// ecos ausentes ou snapshots vencidos como distancia de obstaculo.
 bool lerDistanciaUltra(float &distanciaCm) {
   bool encontrou = false;
   for (uint8_t i = 0; i < 4; ++i) {
@@ -930,6 +939,7 @@ bool lerDistanciaUltra(float &distanciaCm) {
   return telemetriaUltraValida && encontrou;
 }
 
+// Exibe cada canal separadamente para diferenciar ausencia de eco de distancia.
 void mostrarUltra() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -957,11 +967,7 @@ void mostrarUltra() {
   oled.sendBuffer();
 }
 
-bool testarUltra() {
-  float distancia = 0.0f;
-  return lerDistanciaUltra(distancia);
-}
-
+// Apresenta diagnostico de ultra e distancia minima sem acionar movimento.
 void testarUltraNaTela() {
 
   tela = TELA_TESTE_ULTRA;
@@ -1095,6 +1101,8 @@ void testarUltraNaTela() {
   oled.sendBuffer();
 }
 
+// Informa qual ambiente de teste corresponde ao item selecionado e o estado
+// UART conhecido, sem executar automaticamente um firmware de bancada.
 void mostrarInfoTesteChecklist() {
   const char *codigoPrincipal = "";
   const char *codigoSecundario = "";
@@ -1146,6 +1154,7 @@ void mostrarInfoTesteChecklist() {
   oled.sendBuffer();
 }
 
+// Mostra atividade dos 16 sensores recebida do Head para diagnostico do anel.
 void mostrarTesteTSSP() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_4x6_tr);
@@ -1173,6 +1182,8 @@ void mostrarTesteTSSP() {
   oled.sendBuffer();
 }
 
+// Executa sequencia de translacao com potencia reduzida; garante parada ao fim
+// para que a rotina de checklist nao deixe motores energizados.
 void testarMotoresNaTela() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1196,6 +1207,7 @@ void testarMotoresNaTela() {
 // EM BREVE
 // =====================================================
 
+// Pagina informativa para itens da telemetria ainda sem funcionalidade ligada.
 void mostrarEmBreve(
   const char* titulo
 ) {
@@ -1240,6 +1252,7 @@ void mostrarEmBreve(
   oled.sendBuffer();
 }
 
+// Confirma na tela o modo selecionado; o controle efetivo roda no loop do Body.
 void mostrarEstrategiaAtiva(const char *nome) {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1256,6 +1269,7 @@ void mostrarEstrategiaAtiva(const char *nome) {
 // MOSTRAR RESULTADO DO RESET
 // =====================================================
 
+// Mantem o resultado visivel por um segundo para leitura do operador.
 void mostrarResultadoReset(
   bool sucesso
 ) {
@@ -1322,22 +1336,31 @@ void mostrarResultadoReset(
   delay(1000);
 }
 
+// Mantem hardware e interface sincronizados com os valores do perfil selecionado.
 void aplicarLimiaresLDRNoFirmware() {
   if (ldrThresholdTarget == nullptr) {
     return;
   }
+  const ConfigLDR::Limiares &padrao =
+      perfilLDRAtual == 0 ? ConfigLDR::Ataque : ConfigLDR::Defesa;
   ldrThresholdTarget->setThresholds(
       limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
+  ldrThresholdTarget->setCenterSensorThresholds(
+      padrao.centro, padrao.histereseCentro);
 }
 
+// Separa persistencia Attack/Defense para que a calibracao de uma nao sobrescreva a outra.
 const char *namespaceLimiaresLDR() {
-  return modoRoboDefesa ? "ldr-defense" : "ldr-config";
+  return perfilLDRAtual == 0 ? "ldr-config" : "ldr-defense";
 }
 
-void salvarLimiaresLDR() {
+// Persiste snapshot com versao; retorna falha explicitamente para a IHM poder
+// informar que o ajuste existe apenas em RAM e pode se perder ao reiniciar.
+bool salvarLimiaresLDR() {
   if (!preferenciasLDRDisponiveis) {
     Serial.println("ERRO: preferencias LDR indisponiveis; limiares nao salvos.");
-    return;
+    erroLimiaresLDR = true;
+    return false;
   }
 
   const ConfiguracaoLimiaresLDR config = {
@@ -1345,12 +1368,19 @@ void salvarLimiaresLDR() {
   if (preferenciasLDR.putBytes("thresholds", &config, sizeof(config)) !=
       sizeof(config)) {
     Serial.println("ERRO: falha ao salvar limiares LDR no NVS.");
+    erroLimiaresLDR = true;
+    return false;
   }
+  erroLimiaresLDR = false;
+  return true;
 }
 
+// Carrega somente registro com tamanho, versao e faixa validos; em caso contrario
+// conserva os padroes do perfil, em vez de aplicar dados corrompidos.
 void carregarLimiaresLDR() {
   if (!preferenciasLDR.begin(namespaceLimiaresLDR(), false)) {
     Serial.println("ERRO: nao foi possivel abrir preferencias LDR no NVS.");
+    erroLimiaresLDR = true;
     return;
   }
   preferenciasLDRDisponiveis = true;
@@ -1372,53 +1402,144 @@ void carregarLimiaresLDR() {
   }
 }
 
+// Recupera a ultima estrategia selecionada para aplicar seus limiares no boot.
+void carregarPerfilLDR() {
+  Preferences preferenciasPerfil;
+  if (!preferenciasPerfil.begin("ldr-perfil", true)) {
+    // O namespace ainda nao existe apos apagar a flash.
+    if (!preferenciasPerfil.begin("ldr-perfil", false)) {
+      Serial.println("ERRO: nao foi possivel abrir perfil LDR no NVS.");
+      erroPerfilLDR = true;
+      return;
+    }
+  }
+  const uint8_t perfil = preferenciasPerfil.getUChar("ativo", 0);
+  preferenciasPerfil.end();
+  if (perfil > 1) {
+    Serial.println("ERRO: perfil LDR invalido no NVS; usando limiar 1.");
+    erroPerfilLDR = true;
+    return;
+  }
+  perfilLDRAtual = perfil;
+}
+
+// Inicializa os limiares perifericos com o perfil antes de sobrepor ajustes NVS.
+void definirPadroesLDR() {
+  const ConfigLDR::Limiares &padrao =
+      perfilLDRAtual == 0 ? ConfigLDR::Ataque : ConfigLDR::Defesa;
+  limiaresLDR[0] = padrao.esquerda;
+  limiaresLDR[1] = padrao.direita;
+  limiaresLDR[2] = padrao.inferior;
+}
+
+// Troca de perfil atomica do ponto de vista da aplicacao: fecha NVS anterior,
+// carrega novo namespace, aplica limiares e reinicializa classificacao do sensor.
+void selecionarPerfilLDR(uint8_t perfil) {
+  if (preferenciasLDRDisponiveis) {
+    preferenciasLDR.end();
+    preferenciasLDRDisponiveis = false;
+  }
+  perfilLDRAtual = perfil;
+  definirPadroesLDR();
+  if (!preferenciasLDR.begin(namespaceLimiaresLDR(), false)) {
+    Serial.println("ERRO: nao foi possivel abrir preferencias LDR no NVS.");
+  } else {
+    preferenciasLDRDisponiveis = true;
+  }
+  aplicarLimiaresLDRNoFirmware();
+  if (ldrThresholdTarget != nullptr) {
+    ldrThresholdTarget->resetClassification();
+  }
+  salvarLimiaresLDR();
+  Preferences preferenciasPerfil;
+  if (!preferenciasPerfil.begin("ldr-perfil", false)) {
+    Serial.println("ERRO: nao foi possivel salvar perfil LDR no NVS.");
+    erroPerfilLDR = true;
+    return;
+  }
+  const bool perfilSalvo = preferenciasPerfil.putUChar("ativo", perfil) == 1;
+  preferenciasPerfil.end();
+  if (!perfilSalvo) {
+    Serial.println("ERRO: falha ao salvar perfil LDR no NVS.");
+  }
+  erroPerfilLDR = !perfilSalvo;
+}
+
+// Injeta o driver criado pelo Body; a IHM nao assume propriedade do objeto.
 void IHM_conectarLDR(LDRFixed *ldr) {
   ldrThresholdTarget = ldr;
 }
 
+// Mostra medias, limiares ativos e estados sem iniciar uma nova leitura ADC.
 void mostrarLDR() {
   oled.clearBuffer();
-  oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(54, 9, "LDR");
-  oled.drawHLine(8, 13, 112);
   oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 9, "LDR: M=MEDIA L=LIMIAR");
+  oled.drawHLine(8, 13, 112);
 
-  const char *nomes[4] = {"CENTRO", "ESQ", "DIR", "INF"};
-  for (uint8_t i = 0; i < 4; ++i) {
-    const uint8_t y = 24 + i * 10;
-    oled.drawStr(6, y, nomes[i]);
-    oled.setCursor(62, y);
-    oled.print(telemetriaRegiaoBrancaLDR[i] ? "BRANCO" : "VERDE");
+  oled.drawStr(4, 22, "CENTRO");
+  oled.setCursor(48, 22);
+  oled.print(telemetriaRegiaoBrancaLDR[LDRFixed::Centro] ? "BRANCO" : "VERDE");
+
+  const LDRFixed::Regiao regioes[] = {
+      LDRFixed::Esquerda, LDRFixed::Direita, LDRFixed::Inferior};
+  const char *const nomes[] = {"ESQ", "DIR", "INF"};
+  for (uint8_t i = 0; i < 3; ++i) {
+    const uint8_t y = 32 + i * 10;
+    oled.drawStr(4, y, nomes[i]);
+    oled.setCursor(28, y);
+    if (ldrThresholdTarget != nullptr) {
+      oled.print("M");
+      oled.print(ldrThresholdTarget->getAverage(regioes[i]));
+      oled.print(" L");
+      oled.print(ldrThresholdTarget->getThreshold(regioes[i]));
+    } else {
+      oled.print("SEM DADOS");
+    }
+    oled.setCursor(91, y);
+    oled.print(telemetriaRegiaoBrancaLDR[regioes[i]] ? "BRANCO" : "VERDE");
   }
 
   oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
   oled.sendBuffer();
 }
 
+// Exibe selecao de perfil e limiares perifericos; erros de NVS ficam visiveis
+// para que o operador saiba se o ajuste sobrevive a um reinicio.
 void mostrarLDRAjuste() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(20, 9, "LDR TESTE");
+  oled.drawStr(4, 9, "LDR TESTE");
+  oled.setCursor(88, 9);
+  oled.print(perfilLDRAtual == 0 ? "L1" : "L2");
   oled.drawHLine(8, 13, 112);
   oled.setFont(u8g2_font_5x8_tr);
 
-  for (uint8_t i = 0; i < totalRegioesLDR; ++i) {
-    const uint8_t y = 24 + i * 12;
-    if (i == opcaoLDR) {
+  const int primeiroItem = opcaoLDR > 3 ? opcaoLDR - 3 : 0;
+  for (int linha = 0; linha < 4; ++linha) {
+    const int item = primeiroItem + linha;
+    const uint8_t y = 22 + linha * 9;
+    if (item == opcaoLDR) {
       oled.drawStr(4, y, ">");
       if (ajustandoLDR) {
         oled.drawStr(58, y, "*");
       }
     }
-    oled.drawStr(16, y, NOMES_LDR[i]);
-    oled.setCursor(60, y);
-    oled.print(limiaresLDR[i]);
+    if (item < 2) {
+      oled.drawStr(16, y, item == 0 ? "LIMIAR 1" : "LIMIAR 2");
+    } else {
+      oled.drawStr(16, y, NOMES_LDR[item - 2]);
+      oled.setCursor(65, y);
+      oled.print(limiaresLDR[item - 2]);
+    }
   }
 
-  oled.drawStr(4, 62, ajustandoLDR ? "SEL +5  MEXER -5" : "MEXER=REGIAO SEL=AJUSTE");
+  oled.drawStr(4, 62, (erroLimiaresLDR || erroPerfilLDR) ? "ERRO NO NVS" :
+               ajustandoLDR ? "SEL +5  MEXER -5" : "MEXER=PROX SEL=ESCOLHER");
   oled.sendBuffer();
 }
 
+// Exibe direcao IR somente quando pacote recente e bola detectada sao validos.
 void mostrarInfra() {
   oled.clearBuffer();
   oled.setFont(u8g2_font_6x10_tr);
@@ -1438,6 +1559,8 @@ void mostrarInfra() {
   oled.sendBuffer();
 }
 
+// Apresenta SOC e leituras brutas/filtradas; valores nao finitos ou implausiveis
+// sao substituidos por mensagem de falha, nao por um percentual fabricado.
 void mostrarBateria() {
   const float voltage = estimadorBateria.getFilteredVoltage();
   const float percentage = estimadorBateria.getPercentCombined();
@@ -1501,6 +1624,7 @@ void mostrarBateria() {
   oled.sendBuffer();
 }
 
+// Inicializa botoes, estimador, OLED e perfis persistidos antes do primeiro menu.
 void IHM_begin() {
   pinMode(BOTAO_SELECIONAR, INPUT_PULLDOWN);
   pinMode(BOTAO_MEXER, INPUT_PULLDOWN);
@@ -1516,13 +1640,19 @@ void IHM_begin() {
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
+  carregarPerfilLDR();
+  definirPadroesLDR();
   carregarLimiaresLDR();
   aplicarLimiaresLDRNoFirmware();
   telaCarregamento();
   mostrarMenu();
 }
 
+// Faz uma iteracao cooperativa da interface: debounce, atualizacao de bateria,
+// navegacao da maquina de telas e renderizacao periodica das paginas dinamicas.
 void IHM_update() {
+  // Atualiza todos os botoes em cada iteracao para nao perder cliques durante
+  // tarefas de renderizacao; o segundo debounce limita repeticao por pressao.
   const bool selecionar = lerBotaoEstavel(
       BOTAO_SELECIONAR, leituraBrutaSelecionar, estadoEstavelSelecionar,
       ultimaMudancaBrutaSelecionar);
@@ -1559,6 +1689,8 @@ void IHM_update() {
   const bool clicouVoltar = estadoAnteriorVoltar == LOW && voltar == HIGH &&
                             agora - ultimoVoltar > DEBOUNCE;
 
+  // MEXER percorre opcoes ou ajusta valores; a mesma tecla muda de papel
+  // conforme o estado da tela para manter a operacao com tres botoes.
   if (clicouMexer) {
     ultimoMexer = agora;
     if (tela == TELA_MENU) {
@@ -1578,12 +1710,13 @@ void IHM_update() {
       mostrarMenuChecklist();
     } else if (tela == TELA_LDR_AJUSTE) {
       if (ajustandoLDR) {
-        const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) - 5;
-        limiaresLDR[opcaoLDR] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
+        const int regiao = opcaoLDR - 2;
+        const int novoValor = static_cast<int>(limiaresLDR[regiao]) - 5;
+        limiaresLDR[regiao] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
         aplicarLimiaresLDRNoFirmware();
         salvarLimiaresLDR();
       } else {
-        opcaoLDR = (opcaoLDR + 1) % totalRegioesLDR;
+        opcaoLDR = (opcaoLDR + 1) % (totalRegioesLDR + 2);
       }
       mostrarLDRAjuste();
     } else if (tela == TELA_INFO_TESTE) {
@@ -1591,6 +1724,8 @@ void IHM_update() {
     }
   }
 
+  // Cada confirmacao e despachada pela tela atual, tornando explicita a maquina
+  // de estados da interface e evitando que um clique tenha efeitos em outra pagina.
   if (clicouSelecionar) {
     ultimoSelecionar = agora;
     switch (tela) {
@@ -1613,14 +1748,11 @@ void IHM_update() {
         }
         break;
       case TELA_ESTRATEGIA:
-        estrategiaAtaqueAtiva = opcaoEstrategia == 0 && !modoRoboDefesa;
         tela = opcaoEstrategia == 0 ? TELA_ATAQUE : TELA_DEFESA;
-        if (estrategiaAtaqueAtiva) {
+        if (tela == TELA_ATAQUE) {
           mostrarEstrategiaAtiva("ATAQUE ATIVO");
-        } else if (modoRoboDefesa && tela == TELA_DEFESA) {
-          mostrarEstrategiaAtiva("DEFESA ATIVA");
         } else {
-          mostrarEmBreve(tela == TELA_ATAQUE ? "ATAQUE" : "DEFESA");
+          mostrarEstrategiaAtiva("DEFESA ATIVA");
         }
         break;
       case TELA_TELEMETRIA:
@@ -1656,7 +1788,7 @@ void IHM_update() {
           zerarBNO();
         } else {
           tela = TELA_BNO_RESET;
-          mostrarResultadoReset(verificarBNO());
+          mostrarResultadoReset(testarBNO());
           if (telemetriaBNOValida) {
             tela = TELA_BNO_LEITURA;
             mostrarBNO();
@@ -1671,12 +1803,15 @@ void IHM_update() {
         break;
       case TELA_LDR_AJUSTE:
         if (ajustandoLDR) {
-          const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) + 5;
+          const int regiao = opcaoLDR - 2;
+          const int novoValor = static_cast<int>(limiaresLDR[regiao]) + 5;
           if (novoValor <= LIMIAR_LDR_MAXIMO) {
-            limiaresLDR[opcaoLDR] = static_cast<uint16_t>(novoValor);
+            limiaresLDR[regiao] = static_cast<uint16_t>(novoValor);
             aplicarLimiaresLDRNoFirmware();
             salvarLimiaresLDR();
           }
+        } else if (opcaoLDR < 2) {
+          selecionarPerfilLDR(static_cast<uint8_t>(opcaoLDR));
         } else {
           ajustandoLDR = true;
         }
@@ -1713,6 +1848,8 @@ void IHM_update() {
     }
   }
 
+  // VOLTAR encerra o contexto atual e restaura a tela pai; telas de estrategia
+  // retornam ao menu, o que tambem faz o Body interromper a movimentacao.
   if (clicouVoltar) {
     ultimoVoltar = agora;
     if (tela == TELA_MENU) {
@@ -1728,7 +1865,6 @@ void IHM_update() {
       mostrarMenu();
     } else if (tela == TELA_ESTRATEGIA || tela == TELA_ATAQUE ||
                tela == TELA_DEFESA) {
-      estrategiaAtaqueAtiva = false;
       tela = TELA_MENU;
       mostrarMenu();
     } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR) {
@@ -1755,6 +1891,8 @@ void IHM_update() {
   }
 
   static unsigned long ultimaAtualizacao = 0;
+  // Telemetria e bateria sao redesenhadas periodicamente sem bloquear a leitura
+  // de botoes nem depender de uma interrupcao de tela.
   if (agora - ultimaAtualizacao >= 180) {
     ultimaAtualizacao = agora;
     if (tela == TELA_BNO_LEITURA) mostrarBNO();

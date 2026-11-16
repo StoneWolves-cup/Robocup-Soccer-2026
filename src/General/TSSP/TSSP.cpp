@@ -29,6 +29,8 @@ TSSP::TSSP() : totalAmostras_(0), inicioJanela_(0) {
   }
 }
 
+// Configura cada GPIO de acordo com as limitacoes eletricas da familia ESP32
+// e inicia a referencia temporal usada para fechar a primeira janela.
 void TSSP::begin() {
   for (uint8_t i = 0; i < NUM_SENSORES; ++i) {
     // GPIO 34..39 em algumas variantes ESP32 sao somente entrada e nao
@@ -38,6 +40,8 @@ void TSSP::begin() {
   inicioJanela_ = micros();
 }
 
+// Amostra todos os sensores sem bloquear; fechar janelas por tempo, e nao por
+// numero fixo de iteracoes, mantem a atividade comparavel apesar da carga do loop.
 bool TSSP::atualizar() {
   for (uint8_t i = 0; i < NUM_SENSORES; ++i) {
     if (digitalRead(PINOS[i]) == LOW) ++lowCount_[i];
@@ -51,6 +55,8 @@ bool TSSP::atualizar() {
   return true;
 }
 
+// Converte contagens LOW em percentual, reiniciando acumuladores para a proxima
+// janela e preservando o resultado anterior ate existir uma janela completa.
 void TSSP::fecharJanela() {
   if (totalAmostras_ == 0) return;
   for (uint8_t i = 0; i < NUM_SENSORES; ++i) {
@@ -61,6 +67,7 @@ void TSSP::fecharJanela() {
   totalAmostras_ = 0;
 }
 
+// Protege o acesso por indice; leituras fora do anel retornam zero.
 uint8_t TSSP::atividadePercentual(uint8_t indice) const {
   return (indice < NUM_SENSORES) ? atividade_[indice] : 0;
 }

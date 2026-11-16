@@ -9,6 +9,8 @@ volatile uint32_t duracaoPulsoUs[Ultrassonicos::QUANTIDADE] = {};
 volatile bool pulsoIniciado[Ultrassonicos::QUANTIDADE] = {};
 volatile bool leituraConcluida[Ultrassonicos::QUANTIDADE] = {};
 
+// A ISR faz somente captura temporal: calculos e esperas ficam fora da
+// interrupcao para limitar sua duracao e evitar atrasar outras tarefas.
 void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   const uint32_t agora = micros();
   if (nivel == HIGH) {
@@ -21,6 +23,7 @@ void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   }
 }
 
+// Cada wrapper fixa o indice de sensor antes de delegar a captura generica.
 void IRAM_ATTR eco11Mudou() {
   registrarBorda(0, gpio_get_level(static_cast<gpio_num_t>(
       ConfigPinos::Teste::Ultrassonicos::ECHO1)));
@@ -45,6 +48,7 @@ const uint8_t Ultrassonicos::PINOS_ECHO[Ultrassonicos::QUANTIDADE] = {
     ConfigPinos::Teste::Ultrassonicos::ECHO[2],
     ConfigPinos::Teste::Ultrassonicos::ECHO[3]};
 
+// Configura o trigger comum e instala ISR por canal de eco.
 void Ultrassonicos::begin() {
   pinMode(PINO_TRIG, OUTPUT);
   digitalWrite(PINO_TRIG, LOW);
@@ -56,6 +60,9 @@ void Ultrassonicos::begin() {
   attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[3]), eco14Mudou, CHANGE);
 }
 
+// Inicia uma aquisicao nova, dispara os quatro sensores juntos e aguarda um
+// limite finito; a mascara valida cada canal para que falta de eco nunca seja
+// confundida com uma distancia utilizavel pela estrategia.
 void Ultrassonicos::ler(float distanciasCm[QUANTIDADE], bool leiturasValidas[QUANTIDADE]) {
   noInterrupts();
   for (uint8_t i = 0; i < QUANTIDADE; ++i) {

@@ -66,15 +66,15 @@ public:
     // chamada, em milissegundos (usado na integração de corrente).
     void update(uint32_t dtMillis);
 
-    // --- Leituras brutas / filtradas ---
+    // Snapshot do ultimo update: tensao bruta, filtrada e corrente em amperes.
     float getRawVoltage() const     { return _vRaw; }
     float getFilteredVoltage() const { return _vFiltered; }
     float getCurrentA() const       { return _current; }
 
-    // --- Tensão de circuito aberto estimada (compensa Rint) ---
+    // Tensao estimada sem carga, corrigida pela resistencia interna configurada.
     float getOpenCircuitVoltage() const { return _vOpenCircuit; }
 
-    // --- Estimativas de SOC (State of Charge), em % ---
+    // Estado de carga percentual estimado por tensao, coulomb e combinacao.
     float getPercentVoltageBased() const { return _socVoltage; }
     float getPercentCoulomb() const      { return _socCoulomb; }
     float getPercentCombined() const     { return _socCombined; }

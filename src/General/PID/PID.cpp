@@ -13,6 +13,7 @@ PID::PID(
     float outputMax
 )
 {
+    // O limite inicial impede crescimento ilimitado antes de configuracao externa.
     this->kp =
         kp;
 
@@ -36,6 +37,7 @@ PID::PID(
 
 void PID::setGains(float kp, float ki, float kd)
 {
+    // Preserva o acumulador: ajuste de ganho nao equivale a reinicio do controle.
     this->kp = kp;
     this->ki = ki;
     this->kd = kd;
@@ -43,6 +45,7 @@ void PID::setGains(float kp, float ki, float kd)
 
 void PID::setIntegralLimit(float limit)
 {
+    // O limite e simetrico mesmo se o chamador fornecer valor negativo.
     integralLimit = fabs(limit);
 }
 
@@ -68,6 +71,7 @@ float PID::calculate(
     float dt
 )
 {
+    // Tempo invalido nao deve contaminar a integral nem gerar comando de motor.
     if (
         dt <= 0.0f
     )
