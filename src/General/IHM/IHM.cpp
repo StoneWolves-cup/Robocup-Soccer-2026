@@ -109,7 +109,9 @@ int opcaoTelemetria = 0;
 const int totalTelemetria = 5;
 const uint8_t totalRegioesLDR = 3;
 const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF"};
-uint16_t limiaresLDR[totalRegioesLDR] = {3332, 1304, 2312};
+uint16_t limiaresLDR[totalRegioesLDR] = {
+    ConfigLDR::Ataque.esquerda, ConfigLDR::Ataque.direita,
+    ConfigLDR::Ataque.inferior};
 int opcaoLDR = 0;
 bool ajustandoLDR = false;
 LDRFixed *ldrThresholdTarget = nullptr;
@@ -275,6 +277,9 @@ bool IHM_estrategiaAtaqueAtiva() {
 
 void IHM_configurarRoboDefesa() {
   modoRoboDefesa = true;
+  limiaresLDR[0] = ConfigLDR::Defesa.esquerda;
+  limiaresLDR[1] = ConfigLDR::Defesa.direita;
+  limiaresLDR[2] = ConfigLDR::Defesa.inferior;
 }
 
 bool IHM_estrategiaDefesaAtiva() {
@@ -1325,6 +1330,10 @@ void aplicarLimiaresLDRNoFirmware() {
       limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
 }
 
+const char *namespaceLimiaresLDR() {
+  return modoRoboDefesa ? "ldr-defense" : "ldr-config";
+}
+
 void salvarLimiaresLDR() {
   if (!preferenciasLDRDisponiveis) {
     Serial.println("ERRO: preferencias LDR indisponiveis; limiares nao salvos.");
@@ -1340,7 +1349,7 @@ void salvarLimiaresLDR() {
 }
 
 void carregarLimiaresLDR() {
-  if (!preferenciasLDR.begin("ldr-config", false)) {
+  if (!preferenciasLDR.begin(namespaceLimiaresLDR(), false)) {
     Serial.println("ERRO: nao foi possivel abrir preferencias LDR no NVS.");
     return;
   }
@@ -1358,8 +1367,8 @@ void carregarLimiaresLDR() {
     limiaresLDR[1] = config.direita;
     limiaresLDR[2] = config.inferior;
   } else {
-    Serial.println(
-        "NVS sem limiares LDR validos; usando padroes 3332/1304/2312.");
+    Serial.printf("NVS sem limiares LDR validos; usando padroes %u/%u/%u.\n",
+                  limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
   }
 }
 
@@ -1406,7 +1415,7 @@ void mostrarLDRAjuste() {
     oled.print(limiaresLDR[i]);
   }
 
-  oled.drawStr(4, 62, ajustandoLDR ? "SEL +10  MEXER -10" : "MEXER=REGIAO SEL=AJUSTE");
+  oled.drawStr(4, 62, ajustandoLDR ? "SEL +5  MEXER -5" : "MEXER=REGIAO SEL=AJUSTE");
   oled.sendBuffer();
 }
 
@@ -1569,7 +1578,7 @@ void IHM_update() {
       mostrarMenuChecklist();
     } else if (tela == TELA_LDR_AJUSTE) {
       if (ajustandoLDR) {
-        const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) - 10;
+        const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) - 5;
         limiaresLDR[opcaoLDR] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
         aplicarLimiaresLDRNoFirmware();
         salvarLimiaresLDR();
@@ -1662,7 +1671,7 @@ void IHM_update() {
         break;
       case TELA_LDR_AJUSTE:
         if (ajustandoLDR) {
-          const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) + 10;
+          const int novoValor = static_cast<int>(limiaresLDR[opcaoLDR]) + 5;
           if (novoValor <= LIMIAR_LDR_MAXIMO) {
             limiaresLDR[opcaoLDR] = static_cast<uint16_t>(novoValor);
             aplicarLimiaresLDRNoFirmware();

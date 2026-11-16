@@ -38,3 +38,14 @@ abaixo de 10 cm, nenhuma estiver próxima, ou a leitura estiver inválida ou
 expirada, permanece a fuga LDR original. O contorno também é recusado quando o
 LDR central indica branco ou o vetor alternativo ainda é bloqueado pelas
 regiões LDR.
+
+## Ajuste dos limiares LDR
+
+Os valores padrão do ataque e da defesa ficam separados em
+[ConfigLDR.h](../../include/ConfigLDR.h). Os limiares de esquerda, direita e
+inferior também podem ser ajustados na IHM em **Checklist > LDR**: MEXER escolhe
+a região, SEL inicia o ajuste, SEL aumenta e MEXER diminui de 5 em 5. VOLTAR
+retorna ao checklist. Valores salvos na IHM prevalecem sobre os padrões do
+arquivo, inclusive depois de gravar o firmware, e são separados para cada robô.
+Os nove limiares centrais e sua histerese são ajustados no arquivo e exigem
+nova gravação do firmware.
