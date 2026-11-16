@@ -8,6 +8,7 @@ constexpr float POTENCIA_TESTE = 0.35f;
 
 void executarMovimento(Motores &motores, Omni &omni, const char *nome,
                        float x, float y) {
+    // Um eixo por vez facilita identificar inversoes mecanicas com potencia baixa.
     Serial.printf("Movimento: %s\n", nome);
 
     const ComandosMotores rodas = omni.calcular(x, y, 0.0f);
@@ -23,6 +24,7 @@ void executarMovimento(Motores &motores, Omni &omni, const char *nome,
 } // namespace
 
 void executarTesteTranslacaoMotores(Motores &motores, Omni &omni) {
+    // Sequencia percorre os quatro sentidos cardeais e termina com pausa.
     executarMovimento(motores, omni, "frente", 0.0f, 1.0f);
     executarMovimento(motores, omni, "esquerda", 1.0f, 0.0f);
     executarMovimento(motores, omni, "tras", 0.0f, -1.0f);

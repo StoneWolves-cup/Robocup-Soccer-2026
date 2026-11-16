@@ -20,6 +20,7 @@ constexpr float KD_RULES[3][3] = {
 
 float inferGain(const float rules[3][3], const float errorSet[3],
                 const float gyroSet[3]) {
+  // Media ponderada interpola regras vizinhas e evita mudancas bruscas de ganho.
   float weighted = 0.0f;
   float totalWeight = 0.0f;
   for (uint8_t e = 0; e < 3; ++e) {
@@ -41,12 +42,16 @@ FuzzyPID::FuzzyPID(float kp, float ki, float kd, float outputMin,
       errorScale_(fmaxf(errorScaleDegrees, 0.001f)),
       gyroScale_(fmaxf(gyroScaleDegreesPerSecond, 0.001f)) {}
 
+// Descarta integral para que uma nova fase nao herde correcao acumulada.
 void FuzzyPID::reset() { integral_ = 0.0f; }
 
+// Usa magnitude para manter a saturacao simetrica nos dois sentidos de giro.
 void FuzzyPID::setIntegralLimit(float limit) {
   integralLimit_ = fabsf(limit);
 }
 
+// Pertinencias triangulares normalizadas cobrem todo o intervalo entre baixo
+// e alto; sobreposicao suave evita saltos nas fronteiras das regras.
 void FuzzyPID::memberships(float value, float &low, float &medium, float &high) {
   value = fminf(1.0f, fmaxf(0.0f, value));
   low = fmaxf(0.0f, 1.0f - 2.0f * value);
@@ -54,6 +59,8 @@ void FuzzyPID::memberships(float value, float &low, float &medium, float &high) 
   high = fmaxf(0.0f, 2.0f * value - 1.0f);
 }
 
+// Ajusta os ganhos conforme erro e velocidade angular, limita a integral e
+// satura a saida: o gyro atua como amortecimento medido, sem derivar ruido do erro.
 float FuzzyPID::calculate(float error, float gyroZDegreesPerSecond, float dt) {
   if (dt <= 0.0f) return 0.0f;
 

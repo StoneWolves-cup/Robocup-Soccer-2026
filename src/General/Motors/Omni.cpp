@@ -18,6 +18,7 @@ float Omni::normalizarValor(
     float valor
 )
 {
+    // O clamp final protege os limites do PWM mesmo se a entrada for invalida.
     if (valor > 1.0f)
         return 1.0f;
 
@@ -86,6 +87,8 @@ ComandosMotores Omni::calcular(
         );
 
 
+    // Escala todas as rodas pelo mesmo fator para conservar direcao e mistura
+    // rotacional; clamping individual mudaria a trajetoria solicitada.
     if (maior > 1.0f)
     {
         motores.m1 /= maior;

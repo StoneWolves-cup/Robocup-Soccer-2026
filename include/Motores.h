@@ -37,7 +37,8 @@ private:
     static constexpr uint8_t M2_IN1 = ConfigPinos::Body::Motores::M2_IN1;
     static constexpr uint8_t M2_IN2 = ConfigPinos::Body::Motores::M2_IN2;
 
-    // Ajuste para inverter individualmente um motor, se necessario.
+    // Fatores de montagem: permitem corrigir uma roda ligada ao contrario sem
+    // alterar a convencao de movimento usada pela cinemática omnidirecional.
     static constexpr float INV_M1 = 1.0f;
     static constexpr float INV_M2 = 1.0f;
     static constexpr float INV_M3 = 1.0f;
@@ -48,6 +49,7 @@ private:
     // MOTOR INDIVIDUAL
     // ========================================================
 
+    // Converte comando assinado em direcao e PWM para um canal do driver.
     void controlarMotor(
         uint8_t en,
         uint8_t in1,
@@ -60,10 +62,13 @@ public:
 
     Motores();
 
+    // Configura os pinos do driver e inicia em estado parado por seguranca.
     void begin();
 
+    // Desabilita PWM e direcao de todas as rodas.
     void parar();
 
+    // Aplica os comandos normalizados m1..m4; valores sao limitados a [-1, 1].
     void definir(
         float m1,
         float m2,

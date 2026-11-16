@@ -27,3 +27,19 @@ Compile e grave com `pio run -e ldr-fixed-test -t upload`, e abra o monitor com
 `pio device monitor -e ldr-fixed-test`. Esta variante não usa `w/g`; os valores
 podem ser ajustados nas constantes de `TEST_LDR_FIXED.cpp`. O teste original,
 `pio run -e ldr-test`, continua disponível separadamente.
+
+## Seleção de limiares no robô
+
+Na IHM do firmware do corpo, entre em **Testes > LDR**. Use MEXER para
+escolher **LIMIAR 1** (valores de `ConfigLDR::Ataque`) ou **LIMIAR 2**
+(valores de `ConfigLDR::Defesa`) e pressione SELECIONAR. A escolha restaura
+os valores padrão de todas as regiões, incluindo os nove sensores centrais,
+e é aplicada imediatamente. O perfil escolhido é independente da estratégia
+de ataque ou defesa e permanece selecionado após reiniciar.
+
+Na mesma tela é possível ajustar ESQ, DIR e INF em passos de 5: selecione a
+região, use SELECIONAR para aumentar ou MEXER para diminuir e VOLTAR para
+sair. Os ajustes são salvos para o perfil ativo; selecionar novamente um
+limiar restaura seus valores padrão. Após apagar a flash, o padrão inicial é
+LIMIAR 1. Se a tela mostrar `ERRO NO NVS`, a alteração está aplicada em
+memória, mas pode não ser preservada após reiniciar; consulte o monitor serial.

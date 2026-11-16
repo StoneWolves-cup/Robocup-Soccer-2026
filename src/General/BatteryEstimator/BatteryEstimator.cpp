@@ -29,6 +29,9 @@ BatteryEstimator::BatteryEstimator()
       _consumedMah(0), _socVoltage(0), _socCoulomb(100.0f),
       _socCombined(100.0f), _initialized(false), _voltagePinValid(false) {}
 
+// Configura o ADC e inicializa todos os estimadores a partir de uma leitura
+// real; um pino sem ADC invalida explicitamente os resultados em vez de sugerir
+// uma bateria vazia ou cheia.
 void BatteryEstimator::begin() {
     analogReadResolution(12);
     _voltagePinValid = digitalPinToAnalogChannel(PIN_VBAT_ADC) >= 0;
@@ -57,6 +60,7 @@ void BatteryEstimator::begin() {
     _initialized = true;
 }
 
+// Reverte o divisor para estimar tensao da bateria a partir da tensao ADC.
 float BatteryEstimator::readVoltageOnce() {
     // analogReadMilliVolts() já compensa a não-linearidade do ADC do ESP32,
     // é preferível a analogRead() bruto para medições de tensão.
@@ -66,6 +70,8 @@ float BatteryEstimator::readVoltageOnce() {
     return vBat;
 }
 
+// Converte tensao do sensor analogico em corrente; sem hardware configurado,
+// retorna zero e o estimador usa o caminho baseado somente em tensao.
 float BatteryEstimator::readCurrentOnce() {
 #if HAS_CURRENT_SENSOR
     uint32_t mv = analogReadMilliVolts(PIN_CURRENT_ADC);
@@ -77,7 +83,8 @@ float BatteryEstimator::readCurrentOnce() {
 #endif
 }
 
-// Interpolação linear na tabela de calibração (Fase 3 do projeto)
+// Interpola entre pontos de calibracao e limita extrapolacao aos extremos da
+// tabela, evitando percentuais fora de 0-100%.
 float BatteryEstimator::voltageToPercent(float voltage) const {
     if (voltage >= kCurva[0].tensao) return 100.0f;
     if (voltage <= kCurva[kCurvaLen - 1].tensao) return 0.0f;
@@ -95,6 +102,7 @@ float BatteryEstimator::voltageToPercent(float voltage) const {
     return 0.0f;
 }
 
+// Integra corrente pelo intervalo real entre chamadas e limita SOC fisicamente.
 void BatteryEstimator::updateCoulombCounting(uint32_t dtMillis) {
 #if HAS_CURRENT_SENSOR
     // Q_n = Q_{n-1} + I_n * dt   (Coulomb Counting, Fase 5)
@@ -112,6 +120,8 @@ void BatteryEstimator::updateCoulombCounting(uint32_t dtMillis) {
 #endif
 }
 
+// Combina estimativa por tensao e coulomb counting; em repouso a tensao ancora
+// novamente o contador para limitar deriva acumulada durante a integracao.
 void BatteryEstimator::updateCombinedEstimate() {
 #if HAS_CURRENT_SENSOR
     float absI = fabsf(_current);
@@ -132,6 +142,8 @@ void BatteryEstimator::updateCombinedEstimate() {
 #endif
 }
 
+// Atualiza em cadeia: leitura, filtro, compensacao de carga, curva SOC e
+// combinacao. dtMillis deve refletir o tempo desde a atualizacao anterior.
 void BatteryEstimator::update(uint32_t dtMillis) {
     if (!_initialized) begin();
     if (!_voltagePinValid) return;
@@ -158,6 +170,8 @@ void BatteryEstimator::update(uint32_t dtMillis) {
     updateCombinedEstimate();
 }
 
+// Inicializa o contador a partir de um SOC conhecido, por exemplo apos carga
+// completa; limitar a entrada evita estado impossivel acima/abaixo da capacidade.
 void BatteryEstimator::resetCoulombCounter(float socPercent) {
     if (socPercent < 0.0f) socPercent = 0.0f;
     if (socPercent > 100.0f) socPercent = 100.0f;

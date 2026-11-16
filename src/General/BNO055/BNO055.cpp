@@ -10,6 +10,8 @@ BNO055::BNO055()
 {
 }
 
+// Inicia o barramento e o modo NDOF, necessario para rumo absoluto com
+// magnetometro; falha e retornada ao chamador para que ele bloqueie movimento.
 bool BNO055::begin(uint8_t sda, uint8_t scl)
 {
     Wire.begin(sda, scl);
@@ -26,6 +28,8 @@ bool BNO055::begin(uint8_t sda, uint8_t scl)
     return true;
 }
 
+// Le orientacao e gyro juntos para manter a telemetria referente a mesma
+// atualizacao, normalizando heading e convertendo rad/s para graus/s.
 void BNO055::update()
 {
     sensor.getEvent(&orientationEvent);
@@ -49,6 +53,7 @@ void BNO055::update()
     gyroZDegreesPerSecond = gyroEvent.gyro.z * 180.0f / PI;
 }
 
+// Zera o rumo relativo sem alterar a configuracao de calibracao do sensor.
 void BNO055::zero()
 {
     sensor.getEvent(&orientationEvent);
@@ -56,6 +61,7 @@ void BNO055::zero()
     heading = 0.0f;
 }
 
+// Captura explicitamente a leitura atual como referencia de norte.
 void BNO055::calibrateNorth()
 {
     sensor.getEvent(&orientationEvent);
@@ -74,6 +80,7 @@ float BNO055::getGyroZ() const
     return gyroZDegreesPerSecond;
 }
 
+// Le os quatro niveis de calibracao diretamente do driver Adafruit.
 void BNO055::getCalibration(uint8_t &system, uint8_t &gyro,
                             uint8_t &accel, uint8_t &mag)
 {
