@@ -5,7 +5,6 @@
 #include <Omni.h>
 #include <Motores.h>
 #include <PID.h>
-#include <FuzzyPID.h>
 #include <LDRFixed.h>
 #include <ConfigPinos.h>
 #include <freertos/FreeRTOS.h>
@@ -26,7 +25,7 @@ bool IHM_testeTSSPAtivo();
 bool IHM_testeBNOMoveAtivo();
 bool IHM_testeBNOMoveExecutando();
 void IHM_pararTesteBNOMove();
-void IHM_obterGanhosTesteBNOMove(float &kp, float &ki, float &kd);
+void IHM_obterGanhosPID(float &kp, float &ki, float &kd);
 bool IHM_estrategiaAtaqueAtiva();
 bool IHM_estrategiaDefesaAtiva();
 
@@ -54,19 +53,11 @@ constexpr float VELOCIDADE_CORRECAO_LINHA = 0.70f;
 constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 45.0f;
 constexpr float ANGULO_LATERAL_GRAUS = 90.0f;
 constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
-constexpr float ANGULO_MAXIMO_CURVA_GRAUS = 18.540f;
-constexpr float KP_CORRECAO_RUMO = 0.0044f;
-constexpr float KI_CORRECAO_RUMO = 0.0000022f;
-constexpr float KD_CORRECAO_RUMO = 0.00012f;
-constexpr float KP_BNO_MOVE_INICIAL = 0.0044f;
-constexpr float KI_BNO_MOVE_INICIAL = 0.0000022f;
-constexpr float KD_BNO_MOVE_INICIAL = 0.0001f;
-constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.86f;
+constexpr float ANGULO_MAXIMO_CURVA_GRAUS = 35.0f;
+constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.80f;
 constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 0.70f;
-constexpr float PASSO_ROTACAO_BNO_MOVE = 0.006f;
+constexpr float PASSO_ROTACAO_BNO_MOVE = 0.005f;
 constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 10000;
-constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
-constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
 constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
 constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
 constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
@@ -168,13 +159,8 @@ size_t bytesNoBufferUART = 0;
 Motores motores;
 Omni omni;
 LDRFixed ldrFixed;
-FuzzyPID pidCorrecaoRumo(
-    KP_CORRECAO_RUMO, KI_CORRECAO_RUMO, KD_CORRECAO_RUMO,
-    -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO,
-    ESCALA_ERRO_FUZZY_GRAUS, ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO);
-PID pidBnoMove(KP_BNO_MOVE_INICIAL, KI_BNO_MOVE_INICIAL,
-               KD_BNO_MOVE_INICIAL, -ROTACAO_MAXIMA_BNO_MOVE,
-               ROTACAO_MAXIMA_BNO_MOVE);
+PID pidRumo(PIDConfig::KP_PADRAO, PIDConfig::KI_PADRAO, PIDConfig::KD_PADRAO,
+            -ROTACAO_MAXIMA_BNO_MOVE, ROTACAO_MAXIMA_BNO_MOVE);
 float rumoReferenciaBnoMove = 0.0f;
 float rotacaoBnoMove = 0.0f;
 uint32_t ultimoCalculoBnoMoveUs = 0;
@@ -530,15 +516,23 @@ float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ,
   ultimoCalculoPIDUs = agoraUs;
 
   if (!bolaDetectada) {
-    pidCorrecaoRumo.reset();
+    pidRumo.reset();
     return 0.0f;
   }
+
+  float kp = PIDConfig::KP_PADRAO;
+  float ki = PIDConfig::KI_PADRAO;
+  float kd = PIDConfig::KD_PADRAO;
+  IHM_obterGanhosPID(kp, ki, kd);
+  pidRumo.setGains(kp, ki, kd);
 
   float erro = erroAngular(rumoAlvoGraus, heading);
   if (fabsf(erro) <= ZONA_MORTA_RUMO_GRAUS) erro = 0.0f;
 
   const float dt = constrain(decorridoUs / 1000000.0f, 0.001f, 0.1f);
-  return pidCorrecaoRumo.calculate(erro, gyroZ, dt);
+  return constrain(pidRumo.calculate(erro, gyroZ, dt),
+                   -ROTACAO_MAXIMA_CORRECAO,
+                   ROTACAO_MAXIMA_CORRECAO);
 }
 
 // Aplica a cinematica e escala global de potencia propria do perfil do robo.
@@ -556,7 +550,7 @@ void executarTesteBNOMove(bool bnoTelemetriaValida) {
   if (!IHM_testeBNOMoveExecutando()) {
     controleBnoMoveIniciado = false;
     rotacaoBnoMove = 0.0f;
-    pidBnoMove.reset();
+    pidRumo.reset();
     motores.parar();
     return;
   }
@@ -568,23 +562,23 @@ void executarTesteBNOMove(bool bnoTelemetriaValida) {
     IHM_pararTesteBNOMove();
     controleBnoMoveIniciado = false;
     rotacaoBnoMove = 0.0f;
-    pidBnoMove.reset();
+    pidRumo.reset();
     motores.parar();
     return;
   }
 
-  float kp = KP_BNO_MOVE_INICIAL;
-  float ki = KI_BNO_MOVE_INICIAL;
-  float kd = KD_BNO_MOVE_INICIAL;
-  IHM_obterGanhosTesteBNOMove(kp, ki, kd);
-  pidBnoMove.setGains(kp, ki, kd);
+  float kp = PIDConfig::KP_PADRAO;
+  float ki = PIDConfig::KI_PADRAO;
+  float kd = PIDConfig::KD_PADRAO;
+  IHM_obterGanhosPID(kp, ki, kd);
+  pidRumo.setGains(kp, ki, kd);
 
   if (!controleBnoMoveIniciado) {
     rumoReferenciaBnoMove = ultimoPacoteBNO.headingDegrees;
     controleBnoMoveIniciado = true;
     ultimoCalculoBnoMoveUs = micros();
     rotacaoBnoMove = 0.0f;
-    pidBnoMove.reset();
+    pidRumo.reset();
     motores.parar();
     Serial.printf("BNO-Move iniciado; rumo inicial %.2f graus.\n",
                   rumoReferenciaBnoMove);
@@ -600,7 +594,7 @@ void executarTesteBNOMove(bool bnoTelemetriaValida) {
     if (fabsf(erro) <= ZONA_MORTA_BNO_MOVE_GRAUS) erro = 0.0f;
 
     const float dt = constrain(decorridoUs / 1000000.0f, 0.001f, 0.1f);
-    const float alvo = pidBnoMove.calculate(
+    const float alvo = pidRumo.calculate(
         erro, ultimoPacoteBNO.gyroZDegreesPerSecond, dt);
     rotacaoBnoMove += constrain(alvo - rotacaoBnoMove,
                                 -PASSO_ROTACAO_BNO_MOVE,
@@ -862,7 +856,7 @@ void executarEstrategiaDefesa(uint32_t agora, bool quadroNovo,
   if (USAR_BNO &&
       (!bnoTelemetriaValida || !referenciaRumoDefinida)) {
     informarBloqueioMovimento("aguardando telemetria BNO valida e recente.");
-    pidCorrecaoRumo.reset();
+    pidRumo.reset();
     ultimoCalculoPIDUs = micros();
     motores.parar();
     return;
@@ -951,8 +945,7 @@ void setup() {
   const size_t tamanhoBufferUARTConfigurado =
       Serial1.setRxBufferSize(TAMANHO_BUFFER_RX_UART);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
-  pidCorrecaoRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
-  pidBnoMove.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
+  pidRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
   ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
@@ -1072,7 +1065,7 @@ void loop() {
 
   controleBnoMoveIniciado = false;
   rotacaoBnoMove = 0.0f;
-  pidBnoMove.reset();
+  pidRumo.reset();
 
   if (IHM_estrategiaAtaqueAtiva()) {
     float xFugaLDR = 0.0f;
@@ -1170,7 +1163,7 @@ void loop() {
   fugaLDRAtiva = false;
   temporizadorLinhaLimpaAtivo = false;
   correcaoPerifericaLDRValida = false;
-  pidCorrecaoRumo.reset();
+  pidRumo.reset();
   ultimoCalculoPIDUs = micros();
   motores.parar();
 }

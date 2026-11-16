@@ -3,6 +3,11 @@
 
 #include <Arduino.h>
 
+namespace PIDConfig {
+constexpr float KP_PADRAO = 0.0044f;
+constexpr float KI_PADRAO = 0.0000022f;
+constexpr float KD_PADRAO = 0.0001f;
+}  // namespace PIDConfig
 
 class PID
 {
