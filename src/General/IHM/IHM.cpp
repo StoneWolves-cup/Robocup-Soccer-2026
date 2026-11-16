@@ -5,6 +5,7 @@
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
 #include <LDRFixed.h>
+#include <PID.h>
 #include <Preferences.h>
 #include <math.h>
 
@@ -145,9 +146,6 @@ const int totalBNO = 3;
 // 1 = ZERO
 // 2 = RESET SENSOR
 
-constexpr float KP_BNO_MOVE_INICIAL = 0.0044f;
-constexpr float KI_BNO_MOVE_INICIAL = 0.0000022f;
-constexpr float KD_BNO_MOVE_INICIAL = 0.0001f;
 constexpr float PASSO_KP_BNO_MOVE = 0.0002f;
 constexpr float PASSO_KI_BNO_MOVE = 0.0000005f;
 constexpr float PASSO_KD_BNO_MOVE = 0.0001f;
@@ -164,9 +162,9 @@ struct GanhosBnoMove {
   float kd;
 };
 
-float kpBnoMove = KP_BNO_MOVE_INICIAL;
-float kiBnoMove = KI_BNO_MOVE_INICIAL;
-float kdBnoMove = KD_BNO_MOVE_INICIAL;
+float kpBnoMove = PIDConfig::KP_PADRAO;
+float kiBnoMove = PIDConfig::KI_PADRAO;
+float kdBnoMove = PIDConfig::KD_PADRAO;
 uint8_t opcaoBnoMove = 0;
 bool bnoMoveExecutando = false;
 bool bnoMoveErroNvs = false;
@@ -318,7 +316,7 @@ void IHM_pararTesteBNOMove() {
   bnoMoveExecutando = false;
 }
 
-void IHM_obterGanhosTesteBNOMove(float &kp, float &ki, float &kd) {
+void IHM_obterGanhosPID(float &kp, float &ki, float &kd) {
   kp = kpBnoMove;
   ki = kiBnoMove;
   kd = kdBnoMove;
@@ -881,12 +879,18 @@ void carregarGanhosBnoMove() {
   }
 
   GanhosBnoMove ganhos{};
-  const bool leu =
-      preferencias.getBytesLength("pid") == sizeof(ganhos) &&
+  const size_t tamanho = preferencias.getBytesLength("pid");
+  if (tamanho == 0) {
+    preferencias.end();
+    Serial.println("NVS sem ganhos BNO-Move; usando valores padrao.");
+    return;
+  }
+  const bool leu = tamanho == sizeof(ganhos) &&
       preferencias.getBytes("pid", &ganhos, sizeof(ganhos)) == sizeof(ganhos);
   preferencias.end();
   if (!leu) {
-    Serial.println("NVS sem ganhos BNO-Move; usando valores padrao.");
+    Serial.println("ERRO: registro de ganhos BNO-Move invalido no NVS.");
+    bnoMoveErroNvs = true;
     return;
   }
   if (!ganhosBnoMoveValidos(ganhos)) {
@@ -901,23 +905,29 @@ void carregarGanhosBnoMove() {
 }
 
 void ajustarGanhoBnoMove(float direcao) {
+  float valorAnterior = 0.0f;
   switch (opcaoBnoMove) {
     case 1:
+      valorAnterior = kpBnoMove;
       kpBnoMove = constrain(kpBnoMove + direcao * PASSO_KP_BNO_MOVE,
                             0.0f, MAX_KP_BNO_MOVE);
       break;
     case 2:
+      valorAnterior = kiBnoMove;
       kiBnoMove = constrain(kiBnoMove + direcao * PASSO_KI_BNO_MOVE,
                             0.0f, MAX_KI_BNO_MOVE);
       break;
     case 3:
+      valorAnterior = kdBnoMove;
       kdBnoMove = constrain(kdBnoMove + direcao * PASSO_KD_BNO_MOVE,
                             0.0f, MAX_KD_BNO_MOVE);
       break;
     default:
       return;
   }
-  salvarGanhosBnoMove();
+  const float valorAtual = opcaoBnoMove == 1 ? kpBnoMove
+      : opcaoBnoMove == 2 ? kiBnoMove : kdBnoMove;
+  if (valorAtual != valorAnterior) salvarGanhosBnoMove();
 }
 
 void mostrarTesteBNOMove() {
