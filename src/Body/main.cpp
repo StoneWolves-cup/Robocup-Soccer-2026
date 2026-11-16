@@ -69,100 +69,15 @@ constexpr uint8_t ULTRA_INDICE_TRASEIRO = 2;  // ECHO3, GPIO13
 constexpr uint8_t ULTRA_INDICE_FRONTAL = 3;   // ECHO4, GPIO14
 constexpr float DISTANCIA_CONTORNO_ULTRA_CM = 15.0f;
 constexpr float ANGULO_CONTORNO_LDR_GRAUS = 22.0f;
-constexpr uint32_t DURACAO_MANOBRA_DUPLA_MS = 400;
-constexpr float POTENCIA_RECUO_APOS_MANOBRA = 0.50f;
-
-enum class ManobraDupla { Inativa, Avancando, AguardandoUltra, Desviando };
-ManobraDupla manobraDupla = ManobraDupla::Inativa;
-uint32_t inicioManobraDuplaMs = 0;
-uint32_t fimAvancoDuploMs = 0;
-float xDesvioDuplo = 0.0f;
-bool deteccaoDuplaPendenteLimpeza = false;
-bool buscandoLinhaAposManobra = false;
-
-class Defesa {
-public:
-  enum class Movimento { Parado, Tras, Frente, Esquerda, Direita };
-
-  // Abandona a fase atual e limpa a memoria de movimentos para que a proxima
-  // entrada no modo Defesa comece sem recuperacao ou busca antigas.
-  void reiniciar() {
-    buscandoParaFrente_ = false;
-    interromperMovimento();
-  }
-
-  // Interrompe apenas o deslocamento corrente, preservando a fase de busca.
-  void interromperMovimento() {
-    ultimoMovimentoNaLinha_ = Movimento::Parado;
-    recuperacaoAtiva_ = false;
-  }
-
-  // Guarda o ultimo deslocamento lateral feito sobre a linha para poder
-  // inverter o sentido por um intervalo curto se o sensor inferior perder branco.
-  void registrarMovimentoAplicado(bool linhaInferior, Movimento movimento) {
-    ultimoMovimentoNaLinha_ = linhaInferior && !recuperacaoAtiva_
-        ? movimento : Movimento::Parado;
-  }
-
-  // A recuperacao tem prioridade temporal sobre a decisao normal da defesa.
-  bool recuperacaoAtiva() const { return recuperacaoAtiva_; }
-
-  // Converte direcao IR em movimento lateral, com zona morta para nao reagir
-  // a pequenas componentes laterais quando a bola esta a frente/tras.
-  static Movimento movimentoBola(bool bolaDetectada, float anguloBolaGraus) {
-    if (!bolaDetectada) return Movimento::Parado;
-    const float lateral = sinf(anguloBolaGraus * DEG_TO_RAD);
-    if (lateral > 0.08715574274765817f) return Movimento::Esquerda;
-    if (lateral < -0.08715574274765817f) return Movimento::Direita;
-    return Movimento::Parado;
-  }
-
-  // Na linha acompanha a bola lateralmente; fora dela usa o ultrassom traseiro
-  // para alternar recuo/avanco. Sem leitura valida, retorna parado por seguranca.
-  Movimento decidir(bool linhaInferior, bool ultraValido, float distanciaCm,
-                    bool bolaDetectada, float anguloBolaGraus,
-                    uint32_t agoraMs) {
-    if (recuperacaoAtiva_) {
-      if (static_cast<uint32_t>(agoraMs - inicioRecuperacaoMs_) <
-          DURACAO_RECUPERACAO_MS) {
-        return movimentoRecuperacao_;
-      }
-      recuperacaoAtiva_ = false;
-      ultimoMovimentoNaLinha_ = Movimento::Parado;
-    }
-
-    if (!linhaInferior &&
-        (ultimoMovimentoNaLinha_ == Movimento::Esquerda ||
-         ultimoMovimentoNaLinha_ == Movimento::Direita)) {
-      movimentoRecuperacao_ = ultimoMovimentoNaLinha_ == Movimento::Esquerda
-          ? Movimento::Direita : Movimento::Esquerda;
-      ultimoMovimentoNaLinha_ = Movimento::Parado;
-      inicioRecuperacaoMs_ = agoraMs;
-      recuperacaoAtiva_ = true;
-      return movimentoRecuperacao_;
-    }
-
-    if (linhaInferior) {
-      buscandoParaFrente_ = false;
-      return movimentoBola(bolaDetectada, anguloBolaGraus);
-    }
-
-    if (!ultraValido || !isfinite(distanciaCm) ||
-        distanciaCm < 2.0f || distanciaCm > 430.0f) {
-      return Movimento::Parado;
-    }
-    if (distanciaCm <= 30.0f) buscandoParaFrente_ = true;
-    return buscandoParaFrente_ ? Movimento::Frente : Movimento::Tras;
-  }
-
-private:
-  static constexpr uint32_t DURACAO_RECUPERACAO_MS = 600;
-  bool buscandoParaFrente_ = false;
-  bool recuperacaoAtiva_ = false;
-  uint32_t inicioRecuperacaoMs_ = 0;
-  Movimento movimentoRecuperacao_ = Movimento::Parado;
-  Movimento ultimoMovimentoNaLinha_ = Movimento::Parado;
-};
+// Defesa: rumo fixo na bussola (BNO055 em NDOF, 0 graus = norte), distancia
+// constante ao fundo pelo ultrassom traseiro e deslocamento lateral
+// acompanhando a bola.
+constexpr float RUMO_DEFESA_GRAUS = 0.0f;
+constexpr float DISTANCIA_DEFESA_CM = 40.0f;
+constexpr float ZONA_MORTA_DISTANCIA_DEFESA_CM = 2.0f;
+constexpr float GANHO_DISTANCIA_DEFESA = 0.04f;
+constexpr float ZONA_MORTA_BOLA_DEFESA = 0.03489949670250097f;  // sen(2 graus)
+constexpr float GANHO_LATERAL_BOLA_DEFESA = 3.0f;
 
 struct QuadroRecebido {
   IRActivityPacket pacote;
@@ -241,7 +156,6 @@ size_t bytesNoBufferUART = 0;
 Motores motores;
 Omni omni;
 LDRFixed ldrFixed;
-Defesa defesa;
 FuzzyPID pidCorrecaoRumo(
     KP_CORRECAO_RUMO, KI_CORRECAO_RUMO, KD_CORRECAO_RUMO,
     -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO,
@@ -590,7 +504,8 @@ float calcularAnguloMovimentoJ(float anguloBolaGraus) {
 
 // Corrige rumo fixado na primeira leitura valida. O gyro amortece a rotacao e
 // a zona morta reduz acionamentos por pequenas variacoes do magnetometro.
-float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ) {
+float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ,
+                           float rumoAlvoGraus = rumoDesejadoGraus) {
   const uint32_t agoraUs = micros();
   const uint32_t decorridoUs = agoraUs - ultimoCalculoPIDUs;
   ultimoCalculoPIDUs = agoraUs;
@@ -600,7 +515,7 @@ float calcularCorrecaoRumo(bool bolaDetectada, float heading, float gyroZ) {
     return 0.0f;
   }
 
-  float erro = erroAngular(rumoDesejadoGraus, heading);
+  float erro = erroAngular(rumoAlvoGraus, heading);
   if (fabsf(erro) <= ZONA_MORTA_RUMO_GRAUS) erro = 0.0f;
 
   const float dt = constrain(decorridoUs / 1000000.0f, 0.001f, 0.1f);
@@ -846,20 +761,18 @@ void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao,
   aplicarRodas(x, y, rotacao);
 }
 
-// Executa a maquina de estados de defesa: atende borda lateral, recupera de
-// borda dupla, procura a linha por ultrassom e alinha lateralmente a bola.
-// Cada fase exige telemetria recente antes de liberar movimento.
+// Defesa: mantem o rumo fixo da bussola, a distancia constante ao fundo pelo
+// ultrassom traseiro e so se desloca lateralmente para alinhar-se a bola. A
+// fuga de linha branca detectada pelos LDRs tem prioridade sobre a bola.
 void executarEstrategiaDefesa(uint32_t agora, bool quadroNovo,
                               bool bnoTelemetriaValida,
                               bool ultraTelemetriaValida,
                               bool irTelemetriaValida) {
   if (!USAR_LDR) {
     informarBloqueioMovimento("defesa requer o sensor LDR habilitado.");
-    defesa.interromperMovimento();
     motores.parar();
     return;
   }
-  const bool linhaInferior = ldrFixed.regiaoBranca(LDRFixed::Inferior);
   const float distanciaTraseira =
       ultimoPacoteUltra.distanceCm[ULTRA_INDICE_TRASEIRO];
   const bool traseiraValida = ultraTelemetriaValida &&
@@ -869,158 +782,80 @@ void executarEstrategiaDefesa(uint32_t agora, bool quadroNovo,
   if (USAR_BNO &&
       (!bnoTelemetriaValida || !referenciaRumoDefinida)) {
     informarBloqueioMovimento("aguardando telemetria BNO valida e recente.");
-    defesa.interromperMovimento();
-    manobraDupla = ManobraDupla::Inativa;
-    deteccaoDuplaPendenteLimpeza = false;
-    motores.parar();
-    return;
-  }
-
-  const bool linhaEsquerda = ldrFixed.regiaoBranca(LDRFixed::Esquerda);
-  const bool linhaDireita = ldrFixed.regiaoBranca(LDRFixed::Direita);
-  if (!linhaEsquerda && !linhaDireita) deteccaoDuplaPendenteLimpeza = false;
-  if (manobraDupla == ManobraDupla::Inativa && linhaEsquerda && linhaDireita &&
-      !deteccaoDuplaPendenteLimpeza) {
-    defesa.interromperMovimento();
-    manobraDupla = ManobraDupla::Avancando;
-    inicioManobraDuplaMs = agora;
-    deteccaoDuplaPendenteLimpeza = true;
-    Serial.println("LDRs laterais brancos: avancando por 400 ms.");
-  }
-
-  if (manobraDupla == ManobraDupla::Avancando &&
-      (uint32_t)(agora - inicioManobraDuplaMs) >= DURACAO_MANOBRA_DUPLA_MS) {
-    fimAvancoDuploMs = agora;
-    manobraDupla = ManobraDupla::AguardandoUltra;
-    motores.parar();
-    Serial.println("Avanco concluido; aguardando ultrassons laterais.");
-  }
-  if (manobraDupla == ManobraDupla::AguardandoUltra) {
-    const float esquerda = ultimoPacoteUltra.distanceCm[ULTRA_INDICE_ESQUERDO];
-    const float direita = ultimoPacoteUltra.distanceCm[ULTRA_INDICE_DIREITO];
-    const uint8_t mascaraLaterais =
-        (1U << ULTRA_INDICE_ESQUERDO) | (1U << ULTRA_INDICE_DIREITO);
-    if (!ultraTelemetriaValida ||
-        static_cast<int32_t>(ultimoRecebimentoUltraMs - fimAvancoDuploMs) <= 0 ||
-        (ultimoPacoteUltra.validMask & mascaraLaterais) != mascaraLaterais ||
-        !isfinite(esquerda) || esquerda < 2.0f || esquerda > 430.0f ||
-        !isfinite(direita) || direita < 2.0f || direita > 430.0f) {
-      informarBloqueioMovimento("aguardando ultrassons laterais validos apos o avanco.");
-      motores.parar();
-      return;
-    }
-    if (esquerda == direita) {
-      informarBloqueioMovimento("ultrassons laterais com distancias iguais.");
-      motores.parar();
-      return;
-    }
-    xDesvioDuplo = esquerda < direita
-        ? -VELOCIDADE_CORRECAO_LINHA : VELOCIDADE_CORRECAO_LINHA;
-    inicioManobraDuplaMs = agora;
-    manobraDupla = ManobraDupla::Desviando;
-    Serial.printf("Desvio por 400 ms: esquerda=%.1f cm, direita=%.1f cm.\n",
-                  esquerda, direita);
-  }
-  if (manobraDupla == ManobraDupla::Desviando &&
-      (uint32_t)(agora - inicioManobraDuplaMs) >= DURACAO_MANOBRA_DUPLA_MS) {
-    manobraDupla = ManobraDupla::Inativa;
-    buscandoLinhaAposManobra = true;
-    Serial.println("Desvio concluido; retomando alinhamento e busca da linha.");
-  }
-  if (manobraDupla != ManobraDupla::Inativa) {
-    ultimaCorrecaoRumo = USAR_BNO
-        ? calcularCorrecaoRumo(true, ultimoPacoteBNO.headingDegrees,
-                               ultimoPacoteBNO.gyroZDegreesPerSecond)
-        : 0.0f;
-    informarMovimentoLiberado();
-    aplicarRodas(manobraDupla == ManobraDupla::Desviando ? xDesvioDuplo : 0.0f,
-                 manobraDupla == ManobraDupla::Avancando
-                     ? VELOCIDADE_CORRECAO_LINHA : 0.0f,
-                 ultimaCorrecaoRumo);
-    return;
-  }
-
-  if (linhaEsquerda != linhaDireita) {
-    defesa.interromperMovimento();
-    ultimaCorrecaoRumo = USAR_BNO
-        ? calcularCorrecaoRumo(true, ultimoPacoteBNO.headingDegrees,
-                               ultimoPacoteBNO.gyroZDegreesPerSecond)
-        : 0.0f;
-    const float x = linhaEsquerda
-        ? -VELOCIDADE_CORRECAO_LINHA : VELOCIDADE_CORRECAO_LINHA;
-    if (quadroNovo) {
-      Serial.printf("Fuga LDR lateral: linha=%s | vetor=(%.3f, 0) | "
-                    "rotacao=%.3f\n",
-                    linhaEsquerda ? "esquerda" : "direita", x,
-                    ultimaCorrecaoRumo);
-    }
-    informarMovimentoLiberado();
-    aplicarRodas(x, 0.0f, ultimaCorrecaoRumo);
-    return;
-  }
-
-  const Defesa::Movimento movimento = defesa.decidir(
-      linhaInferior, traseiraValida, distanciaTraseira,
-      linhaInferior && irTelemetriaValida && ultimaBolaDetectada,
-      ultimaDirecaoBola, agora);
-  const bool recuperacaoAtiva = defesa.recuperacaoAtiva();
-  if (linhaInferior) buscandoLinhaAposManobra = false;
-
-  if (!recuperacaoAtiva && !linhaInferior && !traseiraValida) {
-    informarBloqueioMovimento("aguardando ultrassom traseiro valido e recente.");
-    defesa.interromperMovimento();
-    motores.parar();
-    return;
-  }
-  if (!recuperacaoAtiva && linhaInferior && !irTelemetriaValida) {
-    informarBloqueioMovimento("aguardando telemetria IR valida e recente.");
-    defesa.interromperMovimento();
-    motores.parar();
-    return;
-  }
-  if (!recuperacaoAtiva && linhaInferior && !ultimaBolaDetectada) {
-    informarBloqueioMovimento("bola nao detectada pelo IR.");
-    defesa.interromperMovimento();
     pidCorrecaoRumo.reset();
     ultimoCalculoPIDUs = micros();
     motores.parar();
     return;
   }
 
-  float x = 0.0f;
-  float y = 0.0f;
-  switch (movimento) {
-    case Defesa::Movimento::Tras:
-      y = buscandoLinhaAposManobra
-          ? -POTENCIA_RECUO_APOS_MANOBRA / POTENCIA_MAXIMA_MOTORES
-          : -VELOCIDADE_CORRECAO_LINHA;
-      break;
-    case Defesa::Movimento::Frente: y = VELOCIDADE_CORRECAO_LINHA; break;
-    case Defesa::Movimento::Esquerda: x = VELOCIDADE_CORRECAO_LINHA; break;
-    case Defesa::Movimento::Direita: x = -VELOCIDADE_CORRECAO_LINHA; break;
-    case Defesa::Movimento::Parado: break;
-  }
-  if (buscandoLinhaAposManobra && !linhaInferior && irTelemetriaValida) {
-    const Defesa::Movimento lateral =
-        Defesa::movimentoBola(ultimaBolaDetectada, ultimaDirecaoBola);
-    if (lateral == Defesa::Movimento::Esquerda) x = VELOCIDADE_CORRECAO_LINHA;
-    if (lateral == Defesa::Movimento::Direita) x = -VELOCIDADE_CORRECAO_LINHA;
-  }
+  const bool linhaEsquerda = ldrFixed.regiaoBranca(LDRFixed::Esquerda);
+  const bool linhaDireita = ldrFixed.regiaoBranca(LDRFixed::Direita);
   ultimaCorrecaoRumo = USAR_BNO
       ? calcularCorrecaoRumo(true, ultimoPacoteBNO.headingDegrees,
-                             ultimoPacoteBNO.gyroZDegreesPerSecond)
+                             ultimoPacoteBNO.gyroZDegreesPerSecond,
+                             RUMO_DEFESA_GRAUS)
       : 0.0f;
-  if (quadroNovo) {
-    Serial.printf("Defesa: recuperacao=%s | linha inferior=%s | traseira=%s%.1f cm | "
-                  "bola=%.1f graus | vetor=(%.3f, %.3f) | rotacao=%.3f\n",
-                  recuperacaoAtiva ? "sim" : "nao",
-                  linhaInferior ? "branco" : "verde",
-                  traseiraValida ? "" : "invalida ", distanciaTraseira,
-                  ultimaDirecaoBola, x, y, ultimaCorrecaoRumo);
+
+  // Mesma fuga do ataque: esquerda -> direita, direita -> esquerda, inferior ->
+  // frente, centro -> tras, com memoria e tempo minimo; o rumo continua fixo.
+  float xFuga = 0.0f;
+  float yFuga = 0.0f;
+  bool centroDetectado = false;
+  bool periferiaDetectada = false;
+  float periferiaX = 0.0f;
+  float periferiaY = 0.0f;
+  const bool linhaDetectada = calcularVetorFugaLDR(
+      xFuga, yFuga, centroDetectado, periferiaDetectada, periferiaX,
+      periferiaY);
+  if (linhaDetectada) {
+    aplicarMemoriaCorrecaoLDR(centroDetectado, periferiaDetectada, periferiaX,
+                              periferiaY, xFuga, yFuga, agora);
+  }
+  if (atualizarFugaLDR(linhaDetectada, xFuga, yFuga, agora)) {
+    if (quadroNovo) {
+      Serial.printf("Defesa: fuga LDR esq=%s dir=%s | vetor=(%.3f, %.3f) | "
+                    "rotacao=%.3f\n",
+                    linhaEsquerda ? "branco" : "verde",
+                    linhaDireita ? "branco" : "verde",
+                    ultimoVetorFugaX, ultimoVetorFugaY, ultimaCorrecaoRumo);
+    }
+    informarMovimentoLiberado();
+    aplicarRodas(ultimoVetorFugaX, ultimoVetorFugaY, ultimaCorrecaoRumo);
+    return;
+  }
+
+  if (!traseiraValida) {
+    informarBloqueioMovimento("aguardando ultrassom traseiro valido e recente.");
+    motores.parar();
+    return;
   }
   informarMovimentoLiberado();
+
+  const float erroDistanciaCm = DISTANCIA_DEFESA_CM - distanciaTraseira;
+  float y = 0.0f;
+  if (fabsf(erroDistanciaCm) > ZONA_MORTA_DISTANCIA_DEFESA_CM) {
+    y = constrain(erroDistanciaCm * GANHO_DISTANCIA_DEFESA,
+                  -VELOCIDADE_CORRECAO_LINHA, VELOCIDADE_CORRECAO_LINHA);
+  }
+
+  const bool bolaValida = irTelemetriaValida && ultimaBolaDetectada;
+  float x = 0.0f;
+  if (bolaValida) {
+    const float lateral = sinf(ultimaDirecaoBola * DEG_TO_RAD);
+    if (fabsf(lateral) > ZONA_MORTA_BOLA_DEFESA) {
+      x = constrain(lateral * GANHO_LATERAL_BOLA_DEFESA, -1.0f, 1.0f) *
+          VELOCIDADE_CORRECAO_LINHA;
+    }
+  }
+
+  if (quadroNovo) {
+    Serial.printf("Defesa: traseira=%.1f cm | bola=%s%.1f graus | "
+                  "rumo=%.1f graus | vetor=(%.3f, %.3f) | rotacao=%.3f\n",
+                  distanciaTraseira, bolaValida ? "" : "ausente ",
+                  ultimaDirecaoBola, ultimoPacoteBNO.headingDegrees, x, y,
+                  ultimaCorrecaoRumo);
+  }
   aplicarRodas(x, y, ultimaCorrecaoRumo);
-  defesa.registrarMovimentoAplicado(linhaInferior, movimento);
 }
 
 } // namespace
@@ -1145,19 +980,11 @@ void loop() {
   }
 
   if (IHM_testeTSSPAtivo()) {
-    defesa.reiniciar();
-    manobraDupla = ManobraDupla::Inativa;
-    deteccaoDuplaPendenteLimpeza = false;
-    buscandoLinhaAposManobra = false;
     motores.parar();
     return;
   }
 
   if (IHM_estrategiaAtaqueAtiva()) {
-    defesa.reiniciar();
-    manobraDupla = ManobraDupla::Inativa;
-    deteccaoDuplaPendenteLimpeza = false;
-    buscandoLinhaAposManobra = false;
     float xFugaLDR = 0.0f;
     float yFugaLDR = 0.0f;
     bool centroDetectado = false;
@@ -1245,18 +1072,11 @@ void loop() {
   }
 
   if (IHM_estrategiaDefesaAtiva()) {
-    fugaLDRAtiva = false;
-    temporizadorLinhaLimpaAtivo = false;
-    correcaoPerifericaLDRValida = false;
     executarEstrategiaDefesa(agora, quadroNovo, bnoTelemetriaValida,
                             ultraTelemetriaValida, irTelemetriaValida);
     return;
   }
 
-  defesa.reiniciar();
-  manobraDupla = ManobraDupla::Inativa;
-  deteccaoDuplaPendenteLimpeza = false;
-  buscandoLinhaAposManobra = false;
   fugaLDRAtiva = false;
   temporizadorLinhaLimpaAtivo = false;
   correcaoPerifericaLDRValida = false;
