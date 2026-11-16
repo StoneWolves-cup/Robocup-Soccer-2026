@@ -145,6 +145,35 @@ const int totalBNO = 3;
 // 1 = ZERO
 // 2 = RESET SENSOR
 
+constexpr float KP_BNO_MOVE_INICIAL = 0.0044f;
+constexpr float KI_BNO_MOVE_INICIAL = 0.0000022f;
+constexpr float KD_BNO_MOVE_INICIAL = 0.0001f;
+constexpr float PASSO_KP_BNO_MOVE = 0.0002f;
+constexpr float PASSO_KI_BNO_MOVE = 0.0000005f;
+constexpr float PASSO_KD_BNO_MOVE = 0.0001f;
+constexpr float MAX_KP_BNO_MOVE = 0.150f;
+constexpr float MAX_KI_BNO_MOVE = 0.0001f;
+constexpr float MAX_KD_BNO_MOVE = 0.004f;
+constexpr uint16_t VERSAO_GANHOS_BNO_MOVE = 1;
+constexpr uint32_t TEMPO_SEGURAR_VOLTAR_BNO_MS = 900;
+
+struct GanhosBnoMove {
+  uint16_t versao;
+  float kp;
+  float ki;
+  float kd;
+};
+
+float kpBnoMove = KP_BNO_MOVE_INICIAL;
+float kiBnoMove = KI_BNO_MOVE_INICIAL;
+float kdBnoMove = KD_BNO_MOVE_INICIAL;
+uint8_t opcaoBnoMove = 0;
+bool bnoMoveExecutando = false;
+bool bnoMoveErroNvs = false;
+bool voltarBnoMovePressionado = false;
+bool voltarBnoMoveLongo = false;
+uint32_t inicioVoltarBnoMoveMs = 0;
+
 // =====================================================
 // MENU CHECKLIST
 // =====================================================
@@ -275,6 +304,24 @@ void IHM_atualizarLDR(const bool regioesBrancas[4]) {
 // O Body consulta estas funcoes no loop para decidir qual maquina de estados roda.
 bool IHM_testeTSSPAtivo() {
   return tela == TELA_TESTE_TSSP;
+}
+
+bool IHM_testeBNOMoveAtivo() {
+  return tela == TELA_TESTE_BNO;
+}
+
+bool IHM_testeBNOMoveExecutando() {
+  return tela == TELA_TESTE_BNO && bnoMoveExecutando;
+}
+
+void IHM_pararTesteBNOMove() {
+  bnoMoveExecutando = false;
+}
+
+void IHM_obterGanhosTesteBNOMove(float &kp, float &ki, float &kd) {
+  kp = kpBnoMove;
+  ki = kiBnoMove;
+  kd = kdBnoMove;
 }
 
 bool IHM_estrategiaAtaqueAtiva() {
@@ -791,134 +838,126 @@ void zerarBNO() {
 // TESTE DO BNO
 // =====================================================
 
-// Mantem o teste alinhado a mesma condicao de validade usada na tela BNO.
+// Mantem ganhos em RAM se o NVS estiver indisponivel e sinaliza a falha na tela.
 bool testarBNO() {
   return telemetriaBNOValida;
 }
 
-// =====================================================
-// TESTE BNO NA TELA
-// =====================================================
+bool salvarGanhosBnoMove() {
+  Preferences preferencias;
+  if (!preferencias.begin("bno-move", false)) {
+    Serial.println("ERRO: nao foi possivel abrir ganhos BNO-Move no NVS.");
+    bnoMoveErroNvs = true;
+    return false;
+  }
+  const GanhosBnoMove ganhos = {
+      VERSAO_GANHOS_BNO_MOVE, kpBnoMove, kiBnoMove, kdBnoMove};
+  const bool salvo =
+      preferencias.putBytes("pid", &ganhos, sizeof(ganhos)) == sizeof(ganhos);
+  preferencias.end();
+  if (!salvo) {
+    Serial.println("ERRO: falha ao salvar ganhos BNO-Move no NVS.");
+  }
+  bnoMoveErroNvs = !salvo;
+  return salvo;
+}
 
-// Mostra resultado de comunicacao observada pelo Body sem reiniciar o sensor.
-void testarBNONaTela() {
+bool ganhosBnoMoveValidos(const GanhosBnoMove &ganhos) {
+  return ganhos.versao == VERSAO_GANHOS_BNO_MOVE &&
+         isfinite(ganhos.kp) && ganhos.kp >= 0.0f &&
+         ganhos.kp <= MAX_KP_BNO_MOVE &&
+         isfinite(ganhos.ki) && ganhos.ki >= 0.0f &&
+         ganhos.ki <= MAX_KI_BNO_MOVE &&
+         isfinite(ganhos.kd) && ganhos.kd >= 0.0f &&
+         ganhos.kd <= MAX_KD_BNO_MOVE;
+}
 
-  tela =
-    TELA_TESTE_BNO;
-
-  oled.clearBuffer();
-
-  oled.setFont(
-    u8g2_font_6x10_tr
-  );
-
-  oled.drawStr(
-    30,
-    10,
-    "TESTES"
-  );
-
-  oled.drawStr(
-    53,
-    25,
-    "BNO"
-  );
-
-  oled.setFont(
-    u8g2_font_5x8_tr
-  );
-
-  oled.drawStr(
-    25,
-    43,
-    "TESTANDO..."
-  );
-
-  oled.sendBuffer();
-
-  delay(500);
-
-  bool resultado =
-    testarBNO();
-
-  oled.clearBuffer();
-
-  oled.setFont(
-    u8g2_font_6x10_tr
-  );
-
-  oled.drawStr(
-    30,
-    9,
-    "TESTES"
-  );
-
-  oled.drawStr(
-    53,
-    20,
-    "BNO"
-  );
-
-  if (resultado) {
-
-    oled.setFont(
-      u8g2_font_5x8_tr
-    );
-
-    oled.drawStr(
-      5,
-      32,
-      "UART: OK"
-    );
-
-    oled.drawStr(
-      5,
-      42,
-      "PACOTE: OK"
-    );
-
-    oled.drawStr(
-      5,
-      52,
-      "PIO: bno-test"
-    );
-
-    oled.setFont(
-      u8g2_font_ncenB10_tr
-    );
-
-    oled.drawStr(
-      76,
-      44,
-      "OK!"
-    );
-
-  } else {
-
-    oled.setFont(
-      u8g2_font_5x8_tr
-    );
-
-    oled.drawStr(
-      5,
-      32,
-      "SEM DADOS DO HEAD"
-    );
-
-    oled.drawStr(5, 43, "PIO: bno-test");
+void carregarGanhosBnoMove() {
+  Preferences preferencias;
+  if (!preferencias.begin("bno-move", false)) {
+    Serial.println("ERRO: nao foi possivel abrir ganhos BNO-Move no NVS.");
+    bnoMoveErroNvs = true;
+    return;
   }
 
-  oled.setFont(
-    u8g2_font_5x8_tr
-  );
+  GanhosBnoMove ganhos{};
+  const bool leu =
+      preferencias.getBytesLength("pid") == sizeof(ganhos) &&
+      preferencias.getBytes("pid", &ganhos, sizeof(ganhos)) == sizeof(ganhos);
+  preferencias.end();
+  if (!leu) {
+    Serial.println("NVS sem ganhos BNO-Move; usando valores padrao.");
+    return;
+  }
+  if (!ganhosBnoMoveValidos(ganhos)) {
+    Serial.println("ERRO: ganhos BNO-Move invalidos no NVS; usando padroes.");
+    bnoMoveErroNvs = true;
+    return;
+  }
 
-  oled.drawStr(
-    17,
-    62,
-    "VOLTAR"
-  );
+  kpBnoMove = ganhos.kp;
+  kiBnoMove = ganhos.ki;
+  kdBnoMove = ganhos.kd;
+}
 
+void ajustarGanhoBnoMove(float direcao) {
+  switch (opcaoBnoMove) {
+    case 1:
+      kpBnoMove = constrain(kpBnoMove + direcao * PASSO_KP_BNO_MOVE,
+                            0.0f, MAX_KP_BNO_MOVE);
+      break;
+    case 2:
+      kiBnoMove = constrain(kiBnoMove + direcao * PASSO_KI_BNO_MOVE,
+                            0.0f, MAX_KI_BNO_MOVE);
+      break;
+    case 3:
+      kdBnoMove = constrain(kdBnoMove + direcao * PASSO_KD_BNO_MOVE,
+                            0.0f, MAX_KD_BNO_MOVE);
+      break;
+    default:
+      return;
+  }
+  salvarGanhosBnoMove();
+}
+
+void mostrarTesteBNOMove() {
+  char linha[32];
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(0, 8, "BNO-MOVE");
+
+  snprintf(linha, sizeof(linha), "BNO:%s H=%+.1f",
+           telemetriaBNOValida ? "OK" : "SEM DADOS", telemetriaHeading);
+  oled.drawStr(0, 18, linha);
+  snprintf(linha, sizeof(linha), "GZ=%+.1f deg/s%s",
+           telemetriaGyroZ, bnoMoveErroNvs ? " NVS!" : "");
+  oled.drawStr(0, 27, linha);
+
+  oled.setFont(u8g2_font_4x6_tr);
+  snprintf(linha, sizeof(linha), "%cRUN/PAUSE: %s",
+           opcaoBnoMove == 0 ? '>' : ' ',
+           bnoMoveExecutando ? "PAUSAR" : "INICIAR");
+  oled.drawStr(0, 37, linha);
+  snprintf(linha, sizeof(linha), "%cKp=%0.4f",
+           opcaoBnoMove == 1 ? '>' : ' ', kpBnoMove);
+  oled.drawStr(0, 44, linha);
+  snprintf(linha, sizeof(linha), "%cKi=%0.7f",
+           opcaoBnoMove == 2 ? '>' : ' ', kiBnoMove);
+  oled.drawStr(0, 51, linha);
+  snprintf(linha, sizeof(linha), "%cKd=%0.4f",
+           opcaoBnoMove == 3 ? '>' : ' ', kdBnoMove);
+  oled.drawStr(0, 58, linha);
+  oled.drawStr(0, 63, "MEXER:ITEM SEL:+ VOLTAR:-/SEGURE:SAIR");
   oled.sendBuffer();
+}
+
+void abrirTesteBNOMove() {
+  tela = TELA_TESTE_BNO;
+  opcaoBnoMove = 0;
+  bnoMoveExecutando = false;
+  voltarBnoMovePressionado = false;
+  voltarBnoMoveLongo = false;
+  mostrarTesteBNOMove();
 }
 
 // =====================================================
@@ -1643,6 +1682,7 @@ void IHM_begin() {
   carregarPerfilLDR();
   definirPadroesLDR();
   carregarLimiaresLDR();
+  carregarGanhosBnoMove();
   aplicarLimiaresLDRNoFirmware();
   telaCarregamento();
   mostrarMenu();
@@ -1688,6 +1728,8 @@ void IHM_update() {
                            agora - ultimoMexer > DEBOUNCE;
   const bool clicouVoltar = estadoAnteriorVoltar == LOW && voltar == HIGH &&
                             agora - ultimoVoltar > DEBOUNCE;
+  const bool pressionouVoltar = estadoAnteriorVoltar == LOW && voltar == HIGH;
+  const bool soltouVoltar = estadoAnteriorVoltar == HIGH && voltar == LOW;
 
   // MEXER percorre opcoes ou ajusta valores; a mesma tecla muda de papel
   // conforme o estado da tela para manter a operacao com tres botoes.
@@ -1708,6 +1750,9 @@ void IHM_update() {
     } else if (tela == TELA_CHECKLIST) {
       opcaoChecklist = (opcaoChecklist + 1) % totalChecklist;
       mostrarMenuChecklist();
+    } else if (tela == TELA_TESTE_BNO) {
+      opcaoBnoMove = (opcaoBnoMove + 1) % 4;
+      mostrarTesteBNOMove();
     } else if (tela == TELA_LDR_AJUSTE) {
       if (ajustandoLDR) {
         const int regiao = opcaoLDR - 2;
@@ -1819,7 +1864,7 @@ void IHM_update() {
         break;
       case TELA_CHECKLIST:
         if (opcaoChecklist == 0) {
-          testarBNONaTela();
+          abrirTesteBNOMove();
         } else if (opcaoChecklist == 1) {
           tela = TELA_TESTE_TSSP;
           mostrarTesteTSSP();
@@ -1838,7 +1883,17 @@ void IHM_update() {
         }
         break;
       case TELA_TESTE_BNO:
-        testarBNONaTela();
+        if (opcaoBnoMove == 0) {
+          if (!bnoMoveExecutando && !telemetriaBNOValida) {
+            Serial.println(
+                "BNO-Move nao iniciado: aguardando telemetria BNO recente.");
+          } else {
+            bnoMoveExecutando = !bnoMoveExecutando;
+          }
+        } else {
+          ajustarGanhoBnoMove(1.0f);
+        }
+        mostrarTesteBNOMove();
         break;
       case TELA_TESTE_ULTRA:
         testarUltraNaTela();
@@ -1850,7 +1905,30 @@ void IHM_update() {
 
   // VOLTAR encerra o contexto atual e restaura a tela pai; telas de estrategia
   // retornam ao menu, o que tambem faz o Body interromper a movimentacao.
-  if (clicouVoltar) {
+  if (tela == TELA_TESTE_BNO) {
+    if (pressionouVoltar) {
+      ultimoVoltar = agora;
+      voltarBnoMovePressionado = true;
+      voltarBnoMoveLongo = false;
+      inicioVoltarBnoMoveMs = agora;
+    }
+    if (voltarBnoMovePressionado && voltar &&
+        !voltarBnoMoveLongo &&
+        (uint32_t)(agora - inicioVoltarBnoMoveMs) >=
+            TEMPO_SEGURAR_VOLTAR_BNO_MS) {
+      voltarBnoMoveLongo = true;
+      voltarBnoMovePressionado = false;
+      bnoMoveExecutando = false;
+      tela = TELA_CHECKLIST;
+      mostrarMenuChecklist();
+    } else if (soltouVoltar && voltarBnoMovePressionado) {
+      voltarBnoMovePressionado = false;
+      ajustarGanhoBnoMove(-1.0f);
+      mostrarTesteBNOMove();
+    }
+  }
+
+  if (clicouVoltar && tela != TELA_TESTE_BNO) {
     ultimoVoltar = agora;
     if (tela == TELA_MENU) {
       mostrarMenu();
@@ -1875,7 +1953,7 @@ void IHM_update() {
       ajustandoLDR = false;
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
-    } else if (tela == TELA_TESTE_BNO || tela == TELA_TESTE_ULTRA) {
+    } else if (tela == TELA_TESTE_ULTRA) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
     } else if (tela == TELA_TESTE_TSSP) {
@@ -1901,6 +1979,7 @@ void IHM_update() {
     else if (tela == TELA_LDR) mostrarLDR();
     else if (tela == TELA_LDR_AJUSTE) mostrarLDRAjuste();
     else if (tela == TELA_BATERIA) mostrarBateria();
+    else if (tela == TELA_TESTE_BNO) mostrarTesteBNOMove();
     else if (tela == TELA_TESTE_TSSP) mostrarTesteTSSP();
     else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();
   }

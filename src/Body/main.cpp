@@ -4,6 +4,7 @@
 #include <IRProtocol.h>
 #include <Omni.h>
 #include <Motores.h>
+#include <PID.h>
 #include <FuzzyPID.h>
 #include <LDRFixed.h>
 #include <ConfigPinos.h>
@@ -22,6 +23,10 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bolaDetectada, bool irValido);
 void IHM_atualizarLDR(const bool regioesBrancas[4]);
 bool IHM_testeTSSPAtivo();
+bool IHM_testeBNOMoveAtivo();
+bool IHM_testeBNOMoveExecutando();
+void IHM_pararTesteBNOMove();
+void IHM_obterGanhosTesteBNOMove(float &kp, float &ki, float &kd);
 bool IHM_estrategiaAtaqueAtiva();
 bool IHM_estrategiaDefesaAtiva();
 
@@ -53,6 +58,13 @@ constexpr float ANGULO_MAXIMO_CURVA_GRAUS = 18.540f;
 constexpr float KP_CORRECAO_RUMO = 0.0044f;
 constexpr float KI_CORRECAO_RUMO = 0.0000022f;
 constexpr float KD_CORRECAO_RUMO = 0.00012f;
+constexpr float KP_BNO_MOVE_INICIAL = 0.0044f;
+constexpr float KI_BNO_MOVE_INICIAL = 0.0000022f;
+constexpr float KD_BNO_MOVE_INICIAL = 0.0001f;
+constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.86f;
+constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 0.70f;
+constexpr float PASSO_ROTACAO_BNO_MOVE = 0.006f;
+constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 10000;
 constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
 constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
 constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
@@ -160,6 +172,13 @@ FuzzyPID pidCorrecaoRumo(
     KP_CORRECAO_RUMO, KI_CORRECAO_RUMO, KD_CORRECAO_RUMO,
     -ROTACAO_MAXIMA_CORRECAO, ROTACAO_MAXIMA_CORRECAO,
     ESCALA_ERRO_FUZZY_GRAUS, ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO);
+PID pidBnoMove(KP_BNO_MOVE_INICIAL, KI_BNO_MOVE_INICIAL,
+               KD_BNO_MOVE_INICIAL, -ROTACAO_MAXIMA_BNO_MOVE,
+               ROTACAO_MAXIMA_BNO_MOVE);
+float rumoReferenciaBnoMove = 0.0f;
+float rotacaoBnoMove = 0.0f;
+uint32_t ultimoCalculoBnoMoveUs = 0;
+bool controleBnoMoveIniciado = false;
 
 // Acende verde apenas quando todos os sensores UART habilitados publicaram
 // recentemente; timeout transforma falha silenciosa de comunicacao em indicacao visivel.
@@ -531,6 +550,67 @@ void aplicarRodas(float x, float y, float rotacao) {
                   comando.m4 * POTENCIA_MAXIMA_MOTORES);
 }
 
+// Mantem o rumo capturado no inicio do teste; qualquer falha de telemetria
+// interrompe o giro e exige que o operador inicie novamente.
+void executarTesteBNOMove(bool bnoTelemetriaValida) {
+  if (!IHM_testeBNOMoveExecutando()) {
+    controleBnoMoveIniciado = false;
+    rotacaoBnoMove = 0.0f;
+    pidBnoMove.reset();
+    motores.parar();
+    return;
+  }
+
+  if (!bnoTelemetriaValida ||
+      !isfinite(ultimoPacoteBNO.headingDegrees) ||
+      !isfinite(ultimoPacoteBNO.gyroZDegreesPerSecond)) {
+    Serial.println("BNO-Move interrompido: telemetria BNO invalida ou expirada.");
+    IHM_pararTesteBNOMove();
+    controleBnoMoveIniciado = false;
+    rotacaoBnoMove = 0.0f;
+    pidBnoMove.reset();
+    motores.parar();
+    return;
+  }
+
+  float kp = KP_BNO_MOVE_INICIAL;
+  float ki = KI_BNO_MOVE_INICIAL;
+  float kd = KD_BNO_MOVE_INICIAL;
+  IHM_obterGanhosTesteBNOMove(kp, ki, kd);
+  pidBnoMove.setGains(kp, ki, kd);
+
+  if (!controleBnoMoveIniciado) {
+    rumoReferenciaBnoMove = ultimoPacoteBNO.headingDegrees;
+    controleBnoMoveIniciado = true;
+    ultimoCalculoBnoMoveUs = micros();
+    rotacaoBnoMove = 0.0f;
+    pidBnoMove.reset();
+    motores.parar();
+    Serial.printf("BNO-Move iniciado; rumo inicial %.2f graus.\n",
+                  rumoReferenciaBnoMove);
+    return;
+  }
+
+  const uint32_t agoraUs = micros();
+  const uint32_t decorridoUs = agoraUs - ultimoCalculoBnoMoveUs;
+  if (decorridoUs >= INTERVALO_PID_BNO_MOVE_US) {
+    ultimoCalculoBnoMoveUs = agoraUs;
+    float erro = erroAngular(rumoReferenciaBnoMove,
+                             ultimoPacoteBNO.headingDegrees);
+    if (fabsf(erro) <= ZONA_MORTA_BNO_MOVE_GRAUS) erro = 0.0f;
+
+    const float dt = constrain(decorridoUs / 1000000.0f, 0.001f, 0.1f);
+    const float alvo = pidBnoMove.calculate(
+        erro, ultimoPacoteBNO.gyroZDegreesPerSecond, dt);
+    rotacaoBnoMove += constrain(alvo - rotacaoBnoMove,
+                                -PASSO_ROTACAO_BNO_MOVE,
+                                PASSO_ROTACAO_BNO_MOVE);
+  }
+
+  const ComandosMotores rodas = omni.calcular(0.0f, 0.0f, rotacaoBnoMove);
+  motores.definir(rodas.m1, rodas.m2, rodas.m3, rodas.m4);
+}
+
 // Nega comandos que apontariam para linha branca detectada na frente/lado
 // correspondente; a seguranca da borda prevalece sobre a perseguicao da bola.
 bool vetorBloqueadoPeloLDR(float x, float y) {
@@ -872,6 +952,7 @@ void setup() {
       Serial1.setRxBufferSize(TAMANHO_BUFFER_RX_UART);
   Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   pidCorrecaoRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
+  pidBnoMove.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
   ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
@@ -983,6 +1064,15 @@ void loop() {
     motores.parar();
     return;
   }
+
+  if (IHM_testeBNOMoveAtivo()) {
+    executarTesteBNOMove(bnoTelemetriaValida);
+    return;
+  }
+
+  controleBnoMoveIniciado = false;
+  rotacaoBnoMove = 0.0f;
+  pidBnoMove.reset();
 
   if (IHM_estrategiaAtaqueAtiva()) {
     float xFugaLDR = 0.0f;
