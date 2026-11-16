@@ -21,9 +21,6 @@ const uint8_t CHANNELS_REGIONS[LDRFixed::QuantidadeRegioes][2] = {
     {0, 1}, {12, 13}, {8, 9}, {10, 11}};
 const uint8_t REGION_SENSOR_COUNTS[LDRFixed::QuantidadeRegioes] = {
     9, 2, 2, 2};
-const uint16_t CENTER_THRESHOLDS[CENTER_SENSOR_COUNT] = {
-    2619, 2890, 3699, 1936, 2045, 1776, 2924, 1874, 3647};
-
 void selectMuxChannel(uint8_t channel) {
     digitalWrite(MUX_S0, channel & 0x01);
     digitalWrite(MUX_S1, (channel >> 1) & 0x01);
@@ -32,6 +29,11 @@ void selectMuxChannel(uint8_t channel) {
     delayMicroseconds(10);
 }
 }  // namespace
+
+LDRFixed::LDRFixed(const ConfigLDR::Limiares &limiares) {
+    setThresholds(limiares.esquerda, limiares.direita, limiares.inferior);
+    setCenterSensorThresholds(limiares.centro, limiares.histereseCentro);
+}
 
 void LDRFixed::begin() {
     pinMode(MUX_SIG, INPUT);
@@ -63,6 +65,14 @@ void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
     _thresholds[Inferior] = inferior;
 }
 
+void LDRFixed::setCenterSensorThresholds(const uint16_t limiares[9],
+                                         uint16_t margemHisterese) {
+    for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i) {
+        _centerSensorThresholds[i] = limiares[i];
+    }
+    _centerHysteresisMargin = margemHisterese;
+}
+
 uint16_t LDRFixed::lerSensor(uint8_t canal) {
     selectMuxChannel(canal);
     for (uint8_t i = 0; i < DISCARD_COUNT; ++i) {
@@ -78,11 +88,12 @@ uint16_t LDRFixed::lerSensor(uint8_t canal) {
 }
 
 bool LDRFixed::classificarAcimaDoLimiar(uint16_t leitura, uint16_t limiar,
-                                        bool &branco) const {
+                                        bool &branco,
+                                        uint16_t margemHisterese) const {
     if (static_cast<uint32_t>(leitura) >
-        static_cast<uint32_t>(limiar) + HYSTERESIS_MARGIN) {
+        static_cast<uint32_t>(limiar) + margemHisterese) {
         branco = true;
-    } else if (static_cast<uint32_t>(leitura) + HYSTERESIS_MARGIN < limiar) {
+    } else if (static_cast<uint32_t>(leitura) + margemHisterese < limiar) {
         branco = false;
     }
     return branco;
@@ -99,11 +110,11 @@ void LDRFixed::update() {
         const uint8_t canal = CHANNELS_CENTER[i];
         if (!_classificacaoInicializada) {
             _sensoresCentroBrancos[canal] =
-                leituras[canal] > CENTER_THRESHOLDS[i];
+                leituras[canal] > _centerSensorThresholds[i];
         }
         if (classificarAcimaDoLimiar(
-                leituras[canal], CENTER_THRESHOLDS[i],
-                _sensoresCentroBrancos[canal])) {
+                leituras[canal], _centerSensorThresholds[i],
+                _sensoresCentroBrancos[canal], _centerHysteresisMargin)) {
             ++sensoresCentroBrancos;
         }
     }
@@ -119,7 +130,8 @@ void LDRFixed::update() {
             _regioesBrancas[regiao] = media > _thresholds[regiao];
         }
         classificarAcimaDoLimiar(
-            media, _thresholds[regiao], _regioesBrancas[regiao]);
+            media, _thresholds[regiao], _regioesBrancas[regiao],
+            HYSTERESIS_MARGIN);
     }
     _classificacaoInicializada = true;
 }

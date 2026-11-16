@@ -59,7 +59,7 @@ constexpr float MARGEM_DOMINANCIA_LATERAL = 0.001f;
 constexpr uint8_t ULTRA_INDICE_TRASEIRO = 2;  // ECHO3, GPIO13
 constexpr uint8_t ULTRA_INDICE_FRONTAL = 3;   // ECHO4, GPIO14
 constexpr float DISTANCIA_CONTORNO_ULTRA_CM = 15.0f;
-constexpr float ANGULO_CONTORNO_LDR_GRAUS = 45.0f;
+constexpr float ANGULO_CONTORNO_LDR_GRAUS = 22.0f;
 
 struct QuadroRecebido {
   IRActivityPacket pacote;
