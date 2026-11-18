@@ -4,7 +4,8 @@
 
 namespace {
 constexpr uint8_t SENSOR_COUNT = 15;
-constexpr uint8_t CENTER_SENSOR_COUNT = 9;
+constexpr uint8_t CENTER_SENSOR_COUNT = 7;
+constexpr uint8_t MIN_CENTER_WHITE_SENSORS = 2;
 constexpr uint8_t SAMPLE_COUNT = 12;
 constexpr uint8_t DISCARD_COUNT = 2;
 constexpr uint16_t HYSTERESIS_MARGIN = 80;
@@ -16,11 +17,14 @@ constexpr uint8_t MUX_S2 = ConfigPinos::Body::LDR::MUX_S2;
 constexpr uint8_t MUX_S3 = ConfigPinos::Body::LDR::MUX_S3;
 
 const uint8_t CHANNELS_CENTER[CENTER_SENSOR_COUNT] = {
-    0, 1, 2, 3, 4, 5, 6, 7, 14};
+    1, 2, 3, 4, 5, 6, 7};
+// A linha Centro e ignorada (usa CHANNELS_CENTER). Superior e a frente: C14 e
+// C0, este emprestado do anel central; se o sensor frontal fisico for outro,
+// troque-o aqui e em CHANNELS_CENTER/ConfigLDR.
 const uint8_t CHANNELS_REGIONS[LDRFixed::QuantidadeRegioes][2] = {
-    {0, 1}, {12, 13}, {8, 9}, {10, 11}};
+    {0, 0}, {12, 13}, {8, 9}, {10, 11}, {14, 0}};
 const uint8_t REGION_SENSOR_COUNTS[LDRFixed::QuantidadeRegioes] = {
-    9, 2, 2, 2};
+    7, 2, 2, 2, 2};
 
 // Atualiza os bits do multiplexador e aguarda assentamento eletrico do canal
 // antes do ADC, evitando que a conversao ainda reflita o canal anterior.
@@ -34,7 +38,8 @@ void selectMuxChannel(uint8_t channel) {
 }  // namespace
 
 LDRFixed::LDRFixed(const ConfigLDR::Limiares &limiares) {
-    setThresholds(limiares.esquerda, limiares.direita, limiares.inferior);
+    setThresholds(limiares.esquerda, limiares.direita, limiares.inferior,
+                  limiares.superior);
     setCenterSensorThresholds(limiares.centro, limiares.histereseCentro);
 }
 
@@ -74,15 +79,16 @@ uint16_t LDRFixed::getAverage(Regiao regiao) const {
 
 // Atualiza somente as regioes perifericas para preservar configuracao do centro.
 void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
-                            uint16_t inferior) {
+                            uint16_t inferior, uint16_t superior) {
     _thresholds[Esquerda] = esquerda;
     _thresholds[Direita] = direita;
     _thresholds[Inferior] = inferior;
+    _thresholds[Superior] = superior;
 }
 
 // Copia valores para o objeto, evitando depender do tempo de vida do array
 // fornecido pela configuracao de perfil.
-void LDRFixed::setCenterSensorThresholds(const uint16_t limiares[9],
+void LDRFixed::setCenterSensorThresholds(const uint16_t limiares[7],
                                          uint16_t margemHisterese) {
     for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i) {
         _centerSensorThresholds[i] = limiares[i];
@@ -107,7 +113,6 @@ uint16_t LDRFixed::lerSensor(uint8_t canal) {
     uint32_t total = 0;
     for (uint8_t i = 0; i < SAMPLE_COUNT; ++i) {
         total += analogRead(MUX_SIG);
-        delayMicroseconds(100);
     }
     return total / SAMPLE_COUNT;
 }
@@ -157,7 +162,8 @@ void LDRFixed::update() {
             ++sensoresCentroBrancos;
         }
     }
-    _regioesBrancas[Centro] = sensoresCentroBrancos >= 1;
+    _regioesBrancas[Centro] =
+        sensoresCentroBrancos >= MIN_CENTER_WHITE_SENSORS;
 
     for (uint8_t regiao = Esquerda; regiao < QuantidadeRegioes; ++regiao) {
         uint32_t total = 0;

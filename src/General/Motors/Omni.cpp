@@ -1,5 +1,11 @@
 #include <Omni.h>
+#include <math.h>
 
+namespace {
+float maiorComponenteTranslacao(float x, float y) {
+    return fmaxf(fabsf(y - x), fabsf(y + x));
+}
+}  // namespace
 
 // ============================================================
 // CONSTRUTOR
@@ -46,6 +52,20 @@ ComandosMotores Omni::calcular(
     // CINEMÁTICA
     // ========================================================
 
+    // Reserva primeiro a faixa completa do comando de rotacao. A translacao
+    // ocupa apenas o espaco restante, sem normalizacao posterior que reduza
+    // a correcao angular solicitada pelo controlador de rumo.
+    if (rotacao > 1.0f) rotacao = 1.0f;
+    if (rotacao < -1.0f) rotacao = -1.0f;
+    const float translacaoMaxima = maiorComponenteTranslacao(x, y);
+    const float espacoTranslacao = 1.0f - fabsf(rotacao);
+    const float escala = translacaoMaxima > espacoTranslacao &&
+                         translacaoMaxima > 0.0f
+        ? espacoTranslacao / translacaoMaxima
+        : 1.0f;
+    x *= escala;
+    y *= escala;
+
     // Disposicao fisica:
     //   M1 dianteira esquerda     M2 dianteira direita
     //   M4 traseira esquerda      M3 traseira direita
@@ -58,44 +78,6 @@ ComandosMotores Omni::calcular(
     motores.m2 = y + x - rotacao; // dianteira direita
     motores.m4 = y + x + rotacao; // traseira esquerda
     motores.m3 = y - x - rotacao; // traseira direita
-
-
-    // ========================================================
-    // NORMALIZAÇÃO
-    // ========================================================
-
-    float maior =
-        fabs(motores.m1);
-
-
-    maior =
-        max(
-            maior,
-            fabs(motores.m2)
-        );
-
-    maior =
-        max(
-            maior,
-            fabs(motores.m3)
-        );
-
-    maior =
-        max(
-            maior,
-            fabs(motores.m4)
-        );
-
-
-    // Escala todas as rodas pelo mesmo fator para conservar direcao e mistura
-    // rotacional; clamping individual mudaria a trajetoria solicitada.
-    if (maior > 1.0f)
-    {
-        motores.m1 /= maior;
-        motores.m2 /= maior;
-        motores.m3 /= maior;
-        motores.m4 /= maior;
-    }
 
 
     // ========================================================

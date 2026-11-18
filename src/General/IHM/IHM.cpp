@@ -4,6 +4,7 @@
 #include <MotoresTeste.h>
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
+#include <ProximidadeIR.h>
 #include <LDRFixed.h>
 #include <PID.h>
 #include <Preferences.h>
@@ -65,7 +66,6 @@ enum Tela {
   TELA_LDR_AJUSTE,
 
   TELA_TESTE_BNO,
-  TELA_TESTE_ULTRA,
   TELA_TESTE_TSSP,
   TELA_INFO_TESTE
 };
@@ -75,7 +75,6 @@ BatteryEstimator estimadorBateria;
 Motores motoresChecklist;
 Omni omniChecklist;
 uint32_t ultimaAtualizacaoBateriaMs = 0;
-uint32_t ultimoLogBateriaMs = 0;
 
 // =====================================================
 // MENU PRINCIPAL
@@ -106,11 +105,11 @@ uint8_t perfilLDRAtual = 0;
 
 int opcaoTelemetria = 0;
 const int totalTelemetria = 5;
-const uint8_t totalRegioesLDR = 3;
-const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF"};
+const uint8_t totalRegioesLDR = 4;
+const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF", "FRT"};
 uint16_t limiaresLDR[totalRegioesLDR] = {
     ConfigLDR::Ataque.esquerda, ConfigLDR::Ataque.direita,
-    ConfigLDR::Ataque.inferior};
+    ConfigLDR::Ataque.inferior, ConfigLDR::Ataque.superior};
 int opcaoLDR = 0;
 bool ajustandoLDR = false;
 LDRFixed *ldrThresholdTarget = nullptr;
@@ -124,14 +123,25 @@ struct ConfiguracaoLimiaresLDR {
   uint16_t esquerda;
   uint16_t direita;
   uint16_t inferior;
+  uint16_t superior;
 };
 
-constexpr uint16_t VERSAO_CONFIG_LDR = 1;
+// A versao 1 nao tinha o limiar superior; ainda e lida para nao perder a
+// calibracao ja salva de ESQ/DIR/INF.
+struct ConfiguracaoLimiaresLDRV1 {
+  uint16_t versao;
+  uint16_t esquerda;
+  uint16_t direita;
+  uint16_t inferior;
+};
+
+constexpr uint16_t VERSAO_CONFIG_LDR = 2;
+constexpr uint16_t VERSAO_CONFIG_LDR_V1 = 1;
 constexpr uint16_t LIMIAR_LDR_MAXIMO = 4095;
 
 // 0 = BNO
 // 1 = KICKER
-// 2 = ULTRA
+// 2 = ULTRASSONICOS
 // 3 = INFRA
 // 4 = LDR
 
@@ -146,9 +156,9 @@ const int totalBNO = 3;
 // 1 = ZERO
 // 2 = RESET SENSOR
 
-constexpr float PASSO_KP_BNO_MOVE = 0.0002f;
-constexpr float PASSO_KI_BNO_MOVE = 0.0000005f;
-constexpr float PASSO_KD_BNO_MOVE = 0.0001f;
+constexpr float PASSO_KP_BNO_MOVE = 0.00004f;
+constexpr float PASSO_KI_BNO_MOVE = 0.00000001f;
+constexpr float PASSO_KD_BNO_MOVE = 0.00003f;
 constexpr float MAX_KP_BNO_MOVE = 0.150f;
 constexpr float MAX_KI_BNO_MOVE = 0.0001f;
 constexpr float MAX_KD_BNO_MOVE = 0.004f;
@@ -177,12 +187,12 @@ uint32_t inicioVoltarBnoMoveMs = 0;
 // =====================================================
 
 int opcaoChecklist = 0;
-const int totalChecklist = 7;
+const int totalChecklist = 6;
 const int itensChecklistVisiveis = 4;
 
-// BNO, IR, ultrassonicos, motores, solenoides, UART e LDR.
+// BNO, IR, motores, solenoides, UART e LDR.
 const char *const NOMES_CHECKLIST[totalChecklist] = {
-    "BNO", "IR / TSSP", "ULTRASSONICOS", "MOTORES",
+    "BNO", "IR / TSSP", "MOTORES",
     "SOLENOIDES", "UART", "LDR"};
 
 // =====================================================
@@ -269,7 +279,8 @@ bool telemetriaBNOValida = false;
 bool telemetriaUltraValida = false;
 bool telemetriaIRValida = false;
 bool telemetriaBolaDetectada = false;
-bool telemetriaRegiaoBrancaLDR[4] = {};
+ProximidadeIR::Estimativa telemetriaProximidadeIR;
+bool telemetriaRegiaoBrancaLDR[LDRFixed::QuantidadeRegioes] = {};
 
 // Recebe um snapshot do Body para a IHM nao acoplar a renderizacao aos drivers
 // UART/sensores. Flags de validade distinguem "zero medido" de "sem pacote".
@@ -277,7 +288,8 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
                              bool bnoValido, const float distanciasUltra[4],
                              uint8_t mascaraUltra, bool ultraValido,
                              const uint8_t atividadesIR[IR_SENSOR_COUNT],
-                             float direcaoIR, bool bolaDetectada, bool irValido) {
+                             float direcaoIR, bool bolaDetectada, bool irValido,
+                             const ProximidadeIR::Estimativa &proximidade) {
   telemetriaHeading = headingDegrees;
   telemetriaGyroZ = gyroZDegreesPerSecond;
   telemetriaBNOValida = bnoValido;
@@ -290,11 +302,12 @@ void IHM_atualizarTelemetria(float headingDegrees, float gyroZDegreesPerSecond,
   telemetriaDirecaoIR = direcaoIR;
   telemetriaBolaDetectada = bolaDetectada;
   telemetriaIRValida = irValido;
+  telemetriaProximidadeIR = proximidade;
 }
 
 // Copia estados LDR para exibi-los sem reamostrar hardware dentro da IHM.
-void IHM_atualizarLDR(const bool regioesBrancas[4]) {
-  for (uint8_t i = 0; i < 4; ++i) {
+void IHM_atualizarLDR(const bool regioesBrancas[LDRFixed::QuantidadeRegioes]) {
+  for (uint8_t i = 0; i < LDRFixed::QuantidadeRegioes; ++i) {
     telemetriaRegiaoBrancaLDR[i] = regioesBrancas[i];
   }
 }
@@ -328,6 +341,12 @@ bool IHM_estrategiaAtaqueAtiva() {
 
 bool IHM_estrategiaDefesaAtiva() {
   return tela == TELA_DEFESA;
+}
+
+bool IHM_obterBateria(float &percentual) {
+  percentual = estimadorBateria.getPercentage();
+  return estimadorBateria.hasReading() &&
+         isfinite(estimadorBateria.getVoltage()) && isfinite(percentual);
 }
 
 // =====================================================
@@ -620,7 +639,7 @@ void mostrarMenuTelemetria() {
   const char* nomes[] = {
     "BNO",
     "KICKER",
-    "ULTRA",
+    "ULTRASSONICOS",
     "INFRA",
     "LDR"
   };
@@ -770,6 +789,45 @@ void mostrarMenuChecklist() {
 // =====================================================
 // MOSTRAR BNO
 // =====================================================
+
+void mostrarUltra() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(45, 9, "ULTRA");
+  oled.drawHLine(8, 13, 112);
+  oled.setFont(u8g2_font_5x8_tr);
+  if (telemetriaUltraValida) {
+    for (uint8_t i = 0; i < 4; ++i) {
+      const uint8_t y = 25 + i * 9;
+      char label[8];
+      snprintf(label, sizeof(label), "U%u:", i + 1);
+      oled.drawStr(8, y, label);
+      if (telemetriaUltraMascara & (1U << i)) {
+        oled.setCursor(38, y);
+        oled.print(telemetriaUltra[i], 1);
+        oled.print(" cm");
+      } else {
+        oled.drawStr(38, y, "SEM ECO");
+      }
+    }
+  } else {
+    oled.drawStr(20, 35, "SEM DADOS UART");
+  }
+  oled.drawStr(4, 62, "VOLTAR = TELEMETRIA");
+  oled.sendBuffer();
+}
+
+bool lerDistanciaUltra(float &distanciaCm) {
+  bool encontrou = false;
+  for (uint8_t i = 0; i < 4; ++i) {
+    if (!(telemetriaUltraMascara & (1U << i))) continue;
+    if (!encontrou || telemetriaUltra[i] < distanciaCm) {
+      distanciaCm = telemetriaUltra[i];
+      encontrou = true;
+    }
+  }
+  return telemetriaUltraValida && encontrou;
+}
 
 // Exibe valores somente quando a telemetria esta marcada valida, evitando
 // apresentar valores antigos/zerados como se fossem leituras atuais.
@@ -954,7 +1012,7 @@ void mostrarTesteBNOMove() {
   snprintf(linha, sizeof(linha), "%cKi=%0.7f",
            opcaoBnoMove == 2 ? '>' : ' ', kiBnoMove);
   oled.drawStr(0, 51, linha);
-  snprintf(linha, sizeof(linha), "%cKd=%0.4f",
+  snprintf(linha, sizeof(linha), "%cKd=%0.5f",
            opcaoBnoMove == 3 ? '>' : ' ', kdBnoMove);
   oled.drawStr(0, 58, linha);
   oled.drawStr(0, 63, "MEXER:ITEM SEL:+ VOLTAR:-/SEGURE:SAIR");
@@ -971,184 +1029,8 @@ void abrirTesteBNOMove() {
 }
 
 // =====================================================
-// HC-SR04 / ULTRA
+// INFORMACOES DE TESTE
 // =====================================================
-
-// Seleciona o menor eco valido para o checklist; mascara e frescor evitam usar
-// ecos ausentes ou snapshots vencidos como distancia de obstaculo.
-bool lerDistanciaUltra(float &distanciaCm) {
-  bool encontrou = false;
-  for (uint8_t i = 0; i < 4; ++i) {
-    if (!(telemetriaUltraMascara & (1U << i))) continue;
-    if (!encontrou || telemetriaUltra[i] < distanciaCm) {
-      distanciaCm = telemetriaUltra[i];
-      encontrou = true;
-    }
-  }
-  return telemetriaUltraValida && encontrou;
-}
-
-// Exibe cada canal separadamente para diferenciar ausencia de eco de distancia.
-void mostrarUltra() {
-  oled.clearBuffer();
-  oled.setFont(u8g2_font_6x10_tr);
-  oled.drawStr(45, 9, "ULTRA");
-  oled.drawHLine(8, 13, 112);
-  oled.setFont(u8g2_font_5x8_tr);
-  if (telemetriaUltraValida) {
-    for (uint8_t i = 0; i < 4; ++i) {
-      const uint8_t y = 25 + i * 9;
-      char label[8];
-      snprintf(label, sizeof(label), "U%u:", i + 1);
-      oled.drawStr(8, y, label);
-      if (telemetriaUltraMascara & (1U << i)) {
-        oled.setCursor(38, y);
-        oled.print(telemetriaUltra[i], 1);
-        oled.print(" cm");
-      } else {
-        oled.drawStr(38, y, "SEM ECO");
-      }
-    }
-  } else {
-    oled.drawStr(20, 35, "SEM DADOS UART");
-  }
-  oled.drawStr(4, 62, "VOLTAR = TELEMETRIA");
-  oled.sendBuffer();
-}
-
-// Apresenta diagnostico de ultra e distancia minima sem acionar movimento.
-void testarUltraNaTela() {
-
-  tela = TELA_TESTE_ULTRA;
-
-  oled.clearBuffer();
-
-  oled.setFont(
-    u8g2_font_6x10_tr
-  );
-
-  oled.drawStr(
-    30,
-    10,
-    "TESTES"
-  );
-
-  oled.drawStr(
-    47,
-    25,
-    "ULTRA"
-  );
-
-  oled.setFont(
-    u8g2_font_5x8_tr
-  );
-
-  oled.drawStr(
-    25,
-    43,
-    "TESTANDO..."
-  );
-
-  oled.sendBuffer();
-
-  delay(400);
-
-  float distancia = 0.0f;
-  bool resultado =
-    lerDistanciaUltra(distancia);
-
-  oled.clearBuffer();
-
-  oled.setFont(
-    u8g2_font_6x10_tr
-  );
-
-  oled.drawStr(
-    30,
-    9,
-    "TESTES"
-  );
-
-  oled.drawStr(
-    49,
-    20,
-    "ULTRA"
-  );
-
-  oled.setFont(
-    u8g2_font_5x8_tr
-  );
-
-  if (resultado) {
-
-    oled.drawStr(
-      5,
-      33,
-      "UART: OK"
-    );
-
-    oled.drawStr(
-      5,
-      43,
-      "SENSOR: OK"
-    );
-
-    oled.drawStr(
-      5,
-      53,
-      "PIO: ultrassonicos-test"
-    );
-
-    oled.setFont(
-      u8g2_font_ncenB10_tr
-    );
-
-    oled.drawStr(
-      82,
-      44,
-      "OK!"
-    );
-
-  } else {
-
-    oled.drawStr(
-      5,
-      33,
-      "SEM DADOS UART"
-    );
-
-    oled.drawStr(
-      5,
-      43,
-      "AGUARDANDO LEITURA"
-    );
-
-    oled.drawStr(5, 53, "PIO: ultrassonicos-test");
-  }
-
-  if (resultado) {
-
-    oled.setFont(
-      u8g2_font_5x8_tr
-    );
-
-    oled.setCursor(
-      5,
-      63
-    );
-
-    oled.print(
-      distancia,
-      1
-    );
-
-    oled.print(
-      " cm"
-    );
-  }
-
-  oled.sendBuffer();
-}
 
 // Informa qual ambiente de teste corresponde ao item selecionado e o estado
 // UART conhecido, sem executar automaticamente um firmware de bancada.
@@ -1162,23 +1044,22 @@ void mostrarInfoTesteChecklist() {
       codigoPrincipal = "tssp-16-test";
       status = telemetriaIRValida ? "IR UART: DADOS OK" : "IR: SEM DADOS UART";
       break;
-    case 3:
+    case 2:
       codigoPrincipal = "motores-test";
       codigoSecundario = "motor-unitario-test";
       break;
-    case 4:
+    case 3:
       codigoPrincipal = "SEM ENV PIO";
       codigoSecundario = "TEST_SOLENOIDES/*.ino";
       break;
-    case 5:
+    case 4:
       codigoPrincipal = "uart-receptor-test";
       codigoSecundario = "uart-emissor-test";
-      status = (telemetriaBNOValida || telemetriaUltraValida ||
-                telemetriaIRValida)
+      status = (telemetriaBNOValida || telemetriaIRValida)
                    ? "UART: DADOS OK"
                    : "UART: SEM DADOS";
       break;
-    case 6:
+    case 5:
       codigoPrincipal = "ldr-test";
       codigoSecundario = "w/branco  g/verde";
       break;
@@ -1393,7 +1274,7 @@ void aplicarLimiaresLDRNoFirmware() {
   const ConfigLDR::Limiares &padrao =
       perfilLDRAtual == 0 ? ConfigLDR::Ataque : ConfigLDR::Defesa;
   ldrThresholdTarget->setThresholds(
-      limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
+      limiaresLDR[0], limiaresLDR[1], limiaresLDR[2], limiaresLDR[3]);
   ldrThresholdTarget->setCenterSensorThresholds(
       padrao.centro, padrao.histereseCentro);
 }
@@ -1413,7 +1294,8 @@ bool salvarLimiaresLDR() {
   }
 
   const ConfiguracaoLimiaresLDR config = {
-      VERSAO_CONFIG_LDR, limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]};
+      VERSAO_CONFIG_LDR, limiaresLDR[0], limiaresLDR[1], limiaresLDR[2],
+      limiaresLDR[3]};
   if (preferenciasLDR.putBytes("thresholds", &config, sizeof(config)) !=
       sizeof(config)) {
     Serial.println("ERRO: falha ao salvar limiares LDR no NVS.");
@@ -1435,19 +1317,35 @@ void carregarLimiaresLDR() {
   preferenciasLDRDisponiveis = true;
 
   ConfiguracaoLimiaresLDR config{};
-  if (preferenciasLDR.getBytesLength("thresholds") == sizeof(config) &&
+  ConfiguracaoLimiaresLDRV1 configV1{};
+  const size_t tamanhoSalvo = preferenciasLDR.getBytesLength("thresholds");
+  if (tamanhoSalvo == sizeof(config) &&
       preferenciasLDR.getBytes("thresholds", &config, sizeof(config)) ==
           sizeof(config) &&
       config.versao == VERSAO_CONFIG_LDR &&
       config.esquerda <= LIMIAR_LDR_MAXIMO &&
       config.direita <= LIMIAR_LDR_MAXIMO &&
-      config.inferior <= LIMIAR_LDR_MAXIMO) {
+      config.inferior <= LIMIAR_LDR_MAXIMO &&
+      config.superior <= LIMIAR_LDR_MAXIMO) {
     limiaresLDR[0] = config.esquerda;
     limiaresLDR[1] = config.direita;
     limiaresLDR[2] = config.inferior;
+    limiaresLDR[3] = config.superior;
+  } else if (tamanhoSalvo == sizeof(configV1) &&
+             preferenciasLDR.getBytes("thresholds", &configV1,
+                                      sizeof(configV1)) == sizeof(configV1) &&
+             configV1.versao == VERSAO_CONFIG_LDR_V1 &&
+             configV1.esquerda <= LIMIAR_LDR_MAXIMO &&
+             configV1.direita <= LIMIAR_LDR_MAXIMO &&
+             configV1.inferior <= LIMIAR_LDR_MAXIMO) {
+    limiaresLDR[0] = configV1.esquerda;
+    limiaresLDR[1] = configV1.direita;
+    limiaresLDR[2] = configV1.inferior;
+    Serial.printf("NVS LDR v1 migrado; FRT usa o padrao %u.\n", limiaresLDR[3]);
   } else {
-    Serial.printf("NVS sem limiares LDR validos; usando padroes %u/%u/%u.\n",
-                  limiaresLDR[0], limiaresLDR[1], limiaresLDR[2]);
+    Serial.printf("NVS sem limiares LDR validos; usando padroes %u/%u/%u/%u.\n",
+                  limiaresLDR[0], limiaresLDR[1], limiaresLDR[2],
+                  limiaresLDR[3]);
   }
 }
 
@@ -1479,6 +1377,7 @@ void definirPadroesLDR() {
   limiaresLDR[0] = padrao.esquerda;
   limiaresLDR[1] = padrao.direita;
   limiaresLDR[2] = padrao.inferior;
+  limiaresLDR[3] = padrao.superior;
 }
 
 // Troca de perfil atomica do ponto de vista da aplicacao: fecha NVS anterior,
@@ -1531,10 +1430,11 @@ void mostrarLDR() {
   oled.print(telemetriaRegiaoBrancaLDR[LDRFixed::Centro] ? "BRANCO" : "VERDE");
 
   const LDRFixed::Regiao regioes[] = {
-      LDRFixed::Esquerda, LDRFixed::Direita, LDRFixed::Inferior};
-  const char *const nomes[] = {"ESQ", "DIR", "INF"};
-  for (uint8_t i = 0; i < 3; ++i) {
-    const uint8_t y = 32 + i * 10;
+      LDRFixed::Esquerda, LDRFixed::Direita, LDRFixed::Inferior,
+      LDRFixed::Superior};
+  const char *const nomes[] = {"ESQ", "DIR", "INF", "FRT"};
+  for (uint8_t i = 0; i < 4; ++i) {
+    const uint8_t y = 30 + i * 8;
     oled.drawStr(4, y, nomes[i]);
     oled.setCursor(28, y);
     if (ldrThresholdTarget != nullptr) {
@@ -1599,29 +1499,33 @@ void mostrarInfra() {
   } else if (!telemetriaBolaDetectada) {
     oled.drawStr(12, 36, "BOLA NAO DETECTADA");
   } else {
-    oled.setCursor(20, 38);
+    oled.setCursor(4, 23);
     oled.print("ANGULO: ");
     oled.print(telemetriaDirecaoIR, 1);
-    oled.print(" graus");
+    oled.setCursor(4, 34);
+    oled.print("PROX: ");
+    if (telemetriaProximidadeIR.valida) {
+      oled.print(ProximidadeIR::descricao(telemetriaProximidadeIR.indice));
+      oled.print(' ');
+      oled.print(telemetriaProximidadeIR.indice * 100.0f, 0);
+      oled.print('%');
+      oled.setCursor(4, 45);
+      oled.print("MAX:");
+      oled.print(telemetriaProximidadeIR.atividadeMaxima);
+      oled.print("% ATIVOS:");
+      oled.print(telemetriaProximidadeIR.sensoresAtivos);
+    } else {
+      oled.print("SEM ESTIMATIVA");
+    }
   }
   oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
   oled.sendBuffer();
 }
 
-// Apresenta SOC e leituras brutas/filtradas; valores nao finitos ou implausiveis
-// sao substituidos por mensagem de falha, nao por um percentual fabricado.
+// Apresenta a tensao medida e o alerta de bateria baixa.
 void mostrarBateria() {
-  const float voltage = estimadorBateria.getFilteredVoltage();
-  const float percentage = estimadorBateria.getPercentCombined();
-  const float rawVoltage = estimadorBateria.getRawVoltage();
-  const float openCircuitVoltage = estimadorBateria.getOpenCircuitVoltage();
-  const float current = estimadorBateria.getCurrentA();
-  const float voltageSoc = estimadorBateria.getPercentVoltageBased();
-  const float coulombSoc = estimadorBateria.getPercentCoulomb();
-  const float consumedMah = estimadorBateria.getConsumedMah();
-  const bool readingValid = isfinite(voltage) && voltage > 0.1f &&
-                            isfinite(percentage) &&
-                            percentage >= 0.0f && percentage <= 100.0f;
+  const float voltage = estimadorBateria.getVoltage();
+  const bool readingValid = estimadorBateria.hasReading() && isfinite(voltage);
 
   oled.clearBuffer();
   oled.setFont(u8g2_font_5x8_tr);
@@ -1631,41 +1535,18 @@ void mostrarBateria() {
 
   if (readingValid) {
     oled.setCursor(4, 21);
-    oled.print("SOC ");
-    oled.print(percentage, 1);
-    oled.print("% V ");
+    oled.print("Tensao: ");
     oled.print(voltage, 2);
     oled.print("V");
 
-    oled.setCursor(4, 29);
-    oled.print("Raw ");
-    oled.print(rawVoltage, 2);
-    oled.print(" Filt ");
-    oled.print(voltage, 2);
-    oled.print("V");
-
-    oled.setCursor(4, 37);
-    oled.print("Voc ");
-    oled.print(openCircuitVoltage, 2);
-    oled.print("V I ");
-    oled.print(current, 2);
-    oled.print("A");
-
-    oled.setCursor(4, 45);
-    oled.print("SOCv ");
-    oled.print(voltageSoc, 0);
-    oled.print("% SOCq ");
-    oled.print(coulombSoc, 0);
+    oled.setCursor(4, 30);
+    oled.print("Bateria: ");
+    oled.print(estimadorBateria.getPercentage(), 0);
     oled.print("%");
 
-    oled.setCursor(4, 53);
-    oled.print("Consumido ");
-    oled.print(consumedMah, 1);
-    oled.print("mAh");
-
-    oled.drawFrame(4, 56, 120, 8);
-    const uint8_t barWidth = static_cast<uint8_t>(percentage * 1.16f);
-    if (barWidth > 0) oled.drawBox(6, 58, barWidth, 4);
+    oled.drawStr(4, 40, estimadorBateria.isLow()
+                            ? "ALERTA: BATERIA BAIXA!"
+                            : "BATERIA OK");
   } else {
     oled.drawStr(16, 32, "LEITURA INVALIDA");
     oled.drawStr(12, 44, "VERIFIQUE BATERIA");
@@ -1680,12 +1561,6 @@ void IHM_begin() {
   pinMode(BOTAO_VOLTAR, INPUT_PULLDOWN);
   estimadorBateria.begin();
   ultimaAtualizacaoBateriaMs = millis();
-  ultimoLogBateriaMs = ultimaAtualizacaoBateriaMs;
-  Serial.println();
-  Serial.println("=== Estimador de bateria iniciado ===");
-  Serial.printf("Tensao inicial: %.3f V | SOC inicial: %.1f %%\n",
-                estimadorBateria.getFilteredVoltage(),
-                estimadorBateria.getPercentCombined());
   Wire.begin(SDA_PIN, SCK_PIN);
   oled.setI2CAddress(0x3C << 1);
   oled.begin();
@@ -1716,21 +1591,6 @@ void IHM_update() {
   if (agora - ultimaAtualizacaoBateriaMs >= UPDATE_PERIOD_MS) {
     estimadorBateria.update(agora - ultimaAtualizacaoBateriaMs);
     ultimaAtualizacaoBateriaMs = agora;
-  }
-  if (agora - ultimoLogBateriaMs >= LOG_PERIOD_MS) {
-    ultimoLogBateriaMs = agora;
-
-    Serial.printf(
-        "Vraw=%.3fV  Vfilt=%.3fV  Voc=%.3fV  I=%.3fA  "
-        "SOCv=%.1f%%  SOCq=%.1f%%  SOCcomb=%.1f%%  consumido=%.1fmAh\n",
-        estimadorBateria.getRawVoltage(),
-        estimadorBateria.getFilteredVoltage(),
-        estimadorBateria.getOpenCircuitVoltage(),
-        estimadorBateria.getCurrentA(),
-        estimadorBateria.getPercentVoltageBased(),
-        estimadorBateria.getPercentCoulomb(),
-        estimadorBateria.getPercentCombined(),
-        estimadorBateria.getConsumedMah());
   }
   const bool clicouSelecionar = estadoAnteriorSelecionar == LOW && selecionar == HIGH &&
                                 agora - ultimoSelecionar > DEBOUNCE;
@@ -1879,10 +1739,8 @@ void IHM_update() {
           tela = TELA_TESTE_TSSP;
           mostrarTesteTSSP();
         } else if (opcaoChecklist == 2) {
-          testarUltraNaTela();
-        } else if (opcaoChecklist == 3) {
           testarMotoresNaTela();
-        } else if (opcaoChecklist == 6) {
+        } else if (opcaoChecklist == 5) {
           tela = TELA_LDR_AJUSTE;
           opcaoLDR = 0;
           ajustandoLDR = false;
@@ -1904,9 +1762,6 @@ void IHM_update() {
           ajustarGanhoBnoMove(1.0f);
         }
         mostrarTesteBNOMove();
-        break;
-      case TELA_TESTE_ULTRA:
-        testarUltraNaTela();
         break;
       default:
         break;
@@ -1961,9 +1816,6 @@ void IHM_update() {
       mostrarMenuTelemetria();
     } else if (tela == TELA_LDR_AJUSTE) {
       ajustandoLDR = false;
-      tela = TELA_CHECKLIST;
-      mostrarMenuChecklist();
-    } else if (tela == TELA_TESTE_ULTRA) {
       tela = TELA_CHECKLIST;
       mostrarMenuChecklist();
     } else if (tela == TELA_TESTE_TSSP) {

@@ -4,26 +4,29 @@
 #include <stdint.h>
 
 namespace ConfigLDR {
-    // Perfil completo por estrategia: limiares perifericos editaveis na IHM,
-    // nove limiares centrais independentes e histerese do anel central.
+    // Perfil completo por estrategia: limiares perifericos editaveis na IHM
+    // (superior = frente, media de C14 e C0), sete limiares centrais
+    // independentes e histerese do anel central.
     struct Limiares {
         uint16_t esquerda;
         uint16_t direita;
         uint16_t inferior;
-        uint16_t centro[9];  // C0, C1, C2, C3, C4, C5, C6, C7, C14
+        uint16_t superior;
+        uint16_t centro[7];  // C1, C2, C3, C4, C5, C6, C7
         uint16_t histereseCentro;
     };
 
     // Cada perfil e aplicado ao selecionar a estrategia; ajuste em campo.
+    // O limiar superior inicial e a media dos antigos limiares de C0 e C14.
     constexpr Limiares Ataque = {
-        3332, 1324, 2312,
-        {2619, 2890, 3699, 1936, 2045, 1776, 2924, 1874, 3647},
+        3332, 1324, 2312, 3133,
+        {2890, 3699, 1936, 2045, 1776, 2924, 1874},
         20
     };
 
     constexpr Limiares Defesa = {
-        178, 2189, 305,
-        {406, 248, 379, 252, 349, 85, 297, 113, 140},
+        178, 2189, 305, 273,
+        {248, 379, 252, 349, 85, 297, 113},
         20
     };
 }  // namespace ConfigLDR

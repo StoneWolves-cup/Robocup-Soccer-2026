@@ -9,8 +9,6 @@ volatile uint32_t duracaoPulsoUs[Ultrassonicos::QUANTIDADE] = {};
 volatile bool pulsoIniciado[Ultrassonicos::QUANTIDADE] = {};
 volatile bool leituraConcluida[Ultrassonicos::QUANTIDADE] = {};
 
-// A ISR faz somente captura temporal: calculos e esperas ficam fora da
-// interrupcao para limitar sua duracao e evitar atrasar outras tarefas.
 void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   const uint32_t agora = micros();
   if (nivel == HIGH) {
@@ -23,47 +21,46 @@ void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   }
 }
 
-// Cada wrapper fixa o indice de sensor antes de delegar a captura generica.
-void IRAM_ATTR eco11Mudou() {
+void IRAM_ATTR eco1Mudou() {
   registrarBorda(0, gpio_get_level(static_cast<gpio_num_t>(
-      ConfigPinos::Teste::Ultrassonicos::ECHO1)));
+      ConfigPinos::Head::Ultrassonicos::ECHO[0])));
 }
-void IRAM_ATTR eco12Mudou() {
+
+void IRAM_ATTR eco2Mudou() {
   registrarBorda(1, gpio_get_level(static_cast<gpio_num_t>(
-      ConfigPinos::Teste::Ultrassonicos::ECHO2)));
+      ConfigPinos::Head::Ultrassonicos::ECHO[1])));
 }
-void IRAM_ATTR eco13Mudou() {
+
+void IRAM_ATTR eco3Mudou() {
   registrarBorda(2, gpio_get_level(static_cast<gpio_num_t>(
-      ConfigPinos::Teste::Ultrassonicos::ECHO3)));
+      ConfigPinos::Head::Ultrassonicos::ECHO[2])));
 }
-void IRAM_ATTR eco14Mudou() {
+
+void IRAM_ATTR eco4Mudou() {
   registrarBorda(3, gpio_get_level(static_cast<gpio_num_t>(
-      ConfigPinos::Teste::Ultrassonicos::ECHO4)));
+      ConfigPinos::Head::Ultrassonicos::ECHO[3])));
 }
 }  // namespace
 
 const uint8_t Ultrassonicos::PINOS_ECHO[Ultrassonicos::QUANTIDADE] = {
-    ConfigPinos::Teste::Ultrassonicos::ECHO[0],
-    ConfigPinos::Teste::Ultrassonicos::ECHO[1],
-    ConfigPinos::Teste::Ultrassonicos::ECHO[2],
-    ConfigPinos::Teste::Ultrassonicos::ECHO[3]};
+    ConfigPinos::Head::Ultrassonicos::ECHO[0],
+    ConfigPinos::Head::Ultrassonicos::ECHO[1],
+    ConfigPinos::Head::Ultrassonicos::ECHO[2],
+    ConfigPinos::Head::Ultrassonicos::ECHO[3]};
 
-// Configura o trigger comum e instala ISR por canal de eco.
 void Ultrassonicos::begin() {
   pinMode(PINO_TRIG, OUTPUT);
   digitalWrite(PINO_TRIG, LOW);
   for (uint8_t pin : PINOS_ECHO) pinMode(pin, INPUT);
 
-  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[0]), eco11Mudou, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[1]), eco12Mudou, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[2]), eco13Mudou, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[3]), eco14Mudou, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[0]), eco1Mudou, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[1]), eco2Mudou, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[2]), eco3Mudou, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[3]), eco4Mudou, CHANGE);
 }
 
-// Inicia uma aquisicao nova, dispara os quatro sensores juntos e aguarda um
-// limite finito; a mascara valida cada canal para que falta de eco nunca seja
-// confundida com uma distancia utilizavel pela estrategia.
-void Ultrassonicos::ler(float distanciasCm[QUANTIDADE], bool leiturasValidas[QUANTIDADE]) {
+void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
+                        bool leiturasValidas[QUANTIDADE]) {
   noInterrupts();
   for (uint8_t i = 0; i < QUANTIDADE; ++i) {
     inicioPulsoUs[i] = 0;
@@ -89,15 +86,14 @@ void Ultrassonicos::ler(float distanciasCm[QUANTIDADE], bool leiturasValidas[QUA
       }
     }
     if (todosConcluidos) break;
-    delay(1);  // Cede tempo para as demais tarefas do ESP32.
+    delay(1);
   }
 
   noInterrupts();
   for (uint8_t i = 0; i < QUANTIDADE; ++i) {
     distanciasCm[i] = duracaoPulsoUs[i] * 0.0343f / 2.0f;
-    leiturasValidas[i] = leituraConcluida[i]
-        && distanciasCm[i] >= 2.0f
-        && distanciasCm[i] <= 430.0f;
+    leiturasValidas[i] = leituraConcluida[i] &&
+        distanciasCm[i] >= 2.0f && distanciasCm[i] <= 430.0f;
   }
   interrupts();
 }

@@ -12,6 +12,12 @@ constexpr uint8_t BNO_PACKET_VERSION = 1;
 constexpr uint8_t ULTRA_PACKET_VERSION = 1;
 constexpr uint8_t ESPNOW_ACK_VERSION = 1;
 constexpr uint8_t IR_SENSOR_COUNT = 16;
+constexpr uint8_t ULTRA_SENSOR_COUNT = 4;
+constexpr uint8_t ULTRA_INDEX_RIGHT = 0;  // ECHO1, sensor direito (U1).
+constexpr uint8_t ULTRA_INDEX_FRONT = 1;  // ECHO2, sensor frontal (U2).
+constexpr uint8_t ULTRA_INDEX_LEFT = 2;   // ECHO3, sensor esquerdo (U3).
+constexpr uint8_t ULTRA_INDEX_REAR = 3;   // ECHO4, sensor traseiro (U4).
+constexpr uint32_t HEAD_BODY_UART_BAUD = 460800;
 
 // Quadros compactos transmitidos entre Head e Body. Magic/version identificam
 // tipo e compatibilidade; sequence detecta repeticao/ordem; checksum XOR
@@ -41,14 +47,13 @@ struct BNODataPacket {
   uint8_t checksum;
 };
 
-// Distancias dos quatro sensores ultrassonicos e mascara de leituras validas.
 struct UltraDataPacket {
   uint16_t magic;
   uint8_t version;
   uint16_t sequence;
   uint8_t reserved[3];
-  float distanceCm[4];  // Ordem ECHO1..ECHO4, em centimetros.
-  uint8_t validMask;  // Bit i = leitura i dentro da faixa aceitavel.
+  float distanceCm[ULTRA_SENSOR_COUNT];
+  uint8_t validMask;
   uint8_t checksum;
 };
 
