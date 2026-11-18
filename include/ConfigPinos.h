@@ -14,6 +14,14 @@ namespace ConfigPinos {
     }  // namespace Geral
 
     namespace Body {
+        namespace Kicker {
+            // Definir todos os GPIOs antes de habilitar o kicker.
+            constexpr int IN_ESQUERDA = -1;
+            constexpr int IN_DIREITA = -1;
+            constexpr int FIM_CURSO_1 = -1;
+            constexpr int FIM_CURSO_2 = -1;
+        }  // namespace Kicker
+
         namespace Motores {
             constexpr uint8_t M1_PWM = 4;
             constexpr uint8_t M1_IN1 = 6;
@@ -43,7 +51,7 @@ namespace ConfigPinos {
         }  // namespace IHM
 
         namespace Bateria {
-            constexpr uint8_t VBAT_ADC = 39;
+            constexpr uint8_t VBAT_ADC = 19;
             constexpr uint8_t CORRENTE_ADC = 35;
         }  // namespace Bateria
 
@@ -62,6 +70,11 @@ namespace ConfigPinos {
             constexpr uint8_t SCL = 9;
         }  // namespace BNO055
 
+        namespace Ultrassonicos {
+            constexpr uint8_t TRIG = 10;
+            constexpr uint8_t ECHO[4] = {11, 12, 13, 14};
+        }  // namespace Ultrassonicos
+
         namespace TSSP {
         // Ordem dos sensores na coroa, do índice 0 em diante no sentido horário.
             constexpr uint8_t PINOS[16] = {
@@ -71,15 +84,6 @@ namespace ConfigPinos {
     }  // namespace Head
 
     namespace Teste {
-        namespace Ultrassonicos {
-            constexpr uint8_t TRIG = 10;
-            constexpr uint8_t ECHO1 = 11;
-            constexpr uint8_t ECHO2 = 12;
-            constexpr uint8_t ECHO3 = 13;
-            constexpr uint8_t ECHO4 = 14;
-            constexpr uint8_t ECHO[4] = {ECHO1, ECHO2, ECHO3, ECHO4};
-        }  // namespace Ultrassonicos
-
         namespace LDR8 {
             constexpr uint8_t MUX_SINAL = 34;
             constexpr uint8_t MUX_S0 = 25;

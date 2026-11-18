@@ -42,6 +42,12 @@ FuzzyPID::FuzzyPID(float kp, float ki, float kd, float outputMin,
       errorScale_(fmaxf(errorScaleDegrees, 0.001f)),
       gyroScale_(fmaxf(gyroScaleDegreesPerSecond, 0.001f)) {}
 
+void FuzzyPID::setGains(float kp, float ki, float kd) {
+  kp_ = kp;
+  ki_ = ki;
+  kd_ = kd;
+}
+
 // Descarta integral para que uma nova fase nao herde correcao acumulada.
 void FuzzyPID::reset() { integral_ = 0.0f; }
 

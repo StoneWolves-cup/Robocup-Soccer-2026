@@ -12,6 +12,8 @@ public:
            float errorScaleDegrees = 30.0f,
            float gyroScaleDegreesPerSecond = 120.0f);
 
+  // Atualiza ganhos base sem descartar a integral.
+  void setGains(float kp, float ki, float kd);
   // Limpa a memoria integral ao iniciar ou interromper uma correcao.
   void reset();
   // Limita o acumulador integral para reduzir wind-up durante saturacao.

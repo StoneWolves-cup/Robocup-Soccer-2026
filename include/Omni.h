@@ -29,7 +29,7 @@ public:
     Omni();
 
     // Converte translacao (x esquerda, y frente) e rotacao em velocidades
-    // de roda mecanum; normaliza o conjunto preservando a proporcao entre rodas.
+    // mecanum; preserva a rotacao e escala a translacao quando houver saturacao.
     ComandosMotores calcular(
         float x,
         float y,

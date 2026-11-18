@@ -16,13 +16,12 @@ constexpr uint32_t INTERVALO_ENVIO_MS = 20;
 constexpr uint32_t INTERVALO_BNO_MS = 10;
 constexpr uint32_t INTERVALO_TENTATIVA_BNO_MS = 50;
 constexpr uint32_t INTERVALO_ULTRA_MS = 100;
-constexpr uint32_t USB_SERIAL_BAUD = 460800;
+constexpr uint32_t USB_SERIAL_BAUD = 921600;
 // ALPHA controla suavizacao da direcao; limiar elimina atividade de fundo antes
 // da soma vetorial e confianca rejeita deteccoes difusas no anel.
 constexpr float ALPHA = 0.25f;
 constexpr float LIMIAR_ATIVIDADE = 2.0f;
 constexpr float CONFIANCA_MIN = 0.15f;
-constexpr uint32_t UART_BAUD = 115200;
 constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
 constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
 constexpr uint8_t BNO_SDA_PIN = ConfigPinos::Head::BNO055::SDA;
@@ -43,17 +42,17 @@ uint32_t ultimaSerial = 0;
 uint32_t ultimoEnvio = 0;
 uint16_t sequenciaIR = 0;
 uint16_t sequenciaBNO = 0;
+uint16_t sequenciaUltra = 0;
 float direcaoGraus = 0.0f;
 float confianca = 0.0f;
 bool bolaDetectada = false;
 BNO055 sensorBNO;
 TSSP sensorTSSP;
+Ultrassonicos sensorUltrassonicos;
 bool bnoDisponivel = false;
 uint32_t ultimaAtualizacaoBNO = 0;
 uint32_t ultimaTentativaBNO = 0;
 uint32_t ultimaLeituraUltra = 0;
-uint16_t sequenciaUltra = 0;
-Ultrassonicos sensorUltrassonicos;
 
 // Soma as atividades acima do ruido como vetores na circunferencia. O filtro
 // exponencial estabiliza a direcao; a razao modulo/soma estima a concentracao
@@ -149,8 +148,6 @@ void transmitirBNO() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
-// Publica distancias e mascara por sensor: ausencia de eco nao e codificada
-// como distancia zero, pois zero seria interpretado como obstaculo proximo.
 void transmitirUltra() {
   float distanciasCm[Ultrassonicos::QUANTIDADE] = {};
   bool leiturasValidas[Ultrassonicos::QUANTIDADE] = {};
@@ -208,19 +205,20 @@ void imprimirDados() {
 // Configura canais seriais e inicializa sensores antes de habilitar a telemetria.
 void setup() {
   Serial.begin(USB_SERIAL_BAUD);
-  Serial1.begin(UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
+  Serial1.begin(HEAD_BODY_UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
 
   iniciarBNO();
   sensorTSSP.begin();
   sensorUltrassonicos.begin();
   Serial.println("Coroa TSSP4038 - 16 sensores");
-  Serial.println(
-      "Head UART1: 115200 baud, 8N1, RX=18 TX=17; TSSP ativo. "
-      "Telemetria BNO055 sera enviada apos inicializacao do sensor.");
+  Serial.printf(
+      "Head UART1: %lu baud, 8N1, RX=18 TX=17; TSSP ativo. "
+      "Telemetria BNO055 sera enviada apos inicializacao do sensor.\n",
+      static_cast<unsigned long>(HEAD_BODY_UART_BAUD));
 }
 
-// Agenda amostragem, atualizacao e transmissao por intervalos independentes;
-// assim a leitura IR continua responsiva sem bloquear pelo ciclo mais lento do ultra.
+// Agenda amostragem, atualizacao e transmissao por intervalos independentes
+// para que a leitura IR continue responsiva.
 void loop() {
   if (sensorTSSP.atualizar()) atualizarAtividadeTSSP();
 

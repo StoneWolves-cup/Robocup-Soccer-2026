@@ -6,12 +6,15 @@
 
 class LDRFixed {
 public:
-    // As regioes perifericas usam media de pares; Centro agrega nove canais.
+    // As regioes perifericas usam media de pares; Centro agrega sete canais.
+    // Superior e a frente do robo (C14 e C0) e fica no fim para preservar os
+    // indices das demais regioes.
     enum Regiao : uint8_t {
         Centro,
         Esquerda,
         Direita,
         Inferior,
+        Superior,
         QuantidadeRegioes
     };
 
@@ -28,10 +31,11 @@ public:
     uint16_t getThreshold(Regiao regiao) const;
     // Retorna a media mais recente usada para classificar a regiao.
     uint16_t getAverage(Regiao regiao) const;
-    // Ajusta os tres limiares editaveis pela IHM.
-    void setThresholds(uint16_t esquerda, uint16_t direita, uint16_t inferior);
+    // Ajusta os quatro limiares editaveis pela IHM.
+    void setThresholds(uint16_t esquerda, uint16_t direita, uint16_t inferior,
+                       uint16_t superior);
     // Ajusta limites individuais do anel central e sua margem de histerese.
-    void setCenterSensorThresholds(const uint16_t limiares[9],
+    void setCenterSensorThresholds(const uint16_t limiares[7],
                                    uint16_t margemHisterese);
     // Forca a proxima amostra a inicializar o estado com os novos limiares.
     void resetClassification();
@@ -46,7 +50,7 @@ private:
 
     uint16_t _thresholds[QuantidadeRegioes] = {};
     uint16_t _averages[QuantidadeRegioes] = {};
-    uint16_t _centerSensorThresholds[9] = {};
+    uint16_t _centerSensorThresholds[7] = {};
     uint16_t _centerHysteresisMargin = 0;
     bool _regioesBrancas[QuantidadeRegioes] = {};
     bool _sensoresCentroBrancos[SENSOR_COUNT] = {};
