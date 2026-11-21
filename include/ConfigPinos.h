@@ -16,10 +16,10 @@ namespace ConfigPinos {
     namespace Body {
         namespace Kicker {
             // Definir todos os GPIOs antes de habilitar o kicker.
-            constexpr int IN_ESQUERDA = -1;
-            constexpr int IN_DIREITA = -1;
-            constexpr int FIM_CURSO_1 = -1;
-            constexpr int FIM_CURSO_2 = -1;
+            constexpr int IN_ESQUERDA = 40;
+            constexpr int IN_DIREITA = 41;
+            // Fim de curso unificado: entrada com INPUT_PULLDOWN, ativa em HIGH.
+            constexpr int FIM_CURSO = 20;
         }  // namespace Kicker
 
         namespace Motores {
@@ -97,10 +97,9 @@ namespace ConfigPinos {
         }  // namespace TSSP2
 
         namespace Solenoides {
-            constexpr uint8_t FIM_CURSO1 = 15;
-            constexpr uint8_t FIM_CURSO2 = 2;
-            constexpr uint8_t RELE1 = 4;
-            constexpr uint8_t RELE2 = 5;
+            constexpr uint8_t FIM_CURSO = 20;
+            constexpr uint8_t RELE1 = 40;
+            constexpr uint8_t RELE2 = 41;
         }  // namespace Solenoides
     }  // namespace Teste
 }  // namespace ConfigPinos

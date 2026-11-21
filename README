@@ -1,0 +1,165 @@
+<p align="center">
+  <img src="Images/Logo_Stone_Wolves.png" alt="Logo da Equipe" width="500">
+</p>
+
+# Nome da Equipe — RoboCup Soccer Infrared 2026
+
+<p align="center">
+  <img src="Images/Foto_Stone_Wolves.jpeg" alt="Foto da Equipe" width="600">
+</p>
+
+## Índice
+
+- [Sobre a Equipe](#sobre-a-equipe)
+- [Integrantes](#integrantes)
+- [O Robô](#o-robô)
+- [Hardware](#hardware)
+- [Software](#software)
+- [Estratégia de Jogo](#estratégia-de-jogo)
+- [Estrutura do Repositório](#estrutura-do-repositório)
+- [Testes](#testes)
+- [Vídeo de Demonstração](#vídeo-de-demonstração)
+- [Resultados e Histórico](#resultados-e-histórico)
+- [Agradecimentos](#agradecimentos)
+- [Contato](#contato)
+
+## Sobre a Equipe
+Nossa equipe é do Brasil, Ribeirão Preto - (SP), da escola do SESI 298 - Castelo Branco. Nós começamos na Robocup Soccer Infrared com outro nome(Robotinic) no Regional de São Paulo em 2025.</p>
+No Regional da modalidade de 2026 tivemos a hora de nos classificaar para o nacional do Torneio em João Pessoa - (PB).</p>
+
+## Integrantes
+
+<table>
+  <tr>
+    <th>Nome</th>
+    <th>Função</th>
+    <th>Contato</th>
+  </tr>
+  <tr>
+    <td>Felipe</td>
+  </tr>
+</table>
+
+## O Robô
+
+### Visão Geral
+
+### Imagens
+| Frente | Trás | Esquerda | Direita | Baixo | Cima |
+|:------:|:----:|:--------:|:-------:|:-----:|:----:|
+| <img src="Images/Foto_Robo_Frente.jpeg" width="400" alt="Foto do robô tirada da Frente"> | <img src="Images/Foto_Robo_Trás.jpeg" width="400" alt="Foto do robô tirada de Trás"> | <img src="Images/Foto_Robo_Esquerda.jpeg" width="400" alt="Foto do robô tirada da esquerda"> | <img src="Images/Foto_Robo_Direita.jpeg" width="400" alt="Foto do robô tirada da direita"> | <img src="Images/Foto_Robo_Baixo.jpeg" width="240" alt="Foto do robô tirada de baixo"> | <img src="Images/Foto_Robo_Cima.jpeg" width="240" alt="Foto do robô tirada de cima"> |
+
+### Especificações
+
+## Hardware
+
+### Microcontroladores
+
+### Sensores
+
+### Atuadores
+
+### Alimentação
+
+### Projeto Mecânico
+
+### Placas Eletrônicas(PCBs)
+| Body | Head | LDR | CDI |
+|:----:|:----:|:---:|:---------:|
+| <img src="Images/Foto_Body_PCB.svg" width="400" alt="Foto da PCB mãe"> | <img src="Images/Foto_Head_PCB.svg" width="400" alt="Foto da PCB de sensores"> | <img src="Images/Foto_LDR_PCB.svg" width="400" alt="Foto da PCB dos LDRs"> | <img src="Images/Foto_Solenoide_PCB.svg" width="400" alt="Foto da CDI"> |
+## Software
+
+### Ambiente de Desenvolvimento
+
+O firmware é escrito em C++ com o framework Arduino, sobre a plataforma `espressif32@8.0.0`, e gerenciado pelo [PlatformIO](https://platformio.org/) (VS Code). Os dois microcontroladores são ESP32-S3 (`esp32-s3-devkitc-1`) e a comunicação serial USB usa 921600 baud. As dependências (Adafruit BNO055, Adafruit Unified Sensor, U8g2 e Adafruit BusIO) são baixadas automaticamente pelo PlatformIO.
+
+### Arquitetura
+
+O robô é dividido em duas placas, cada uma com seu ambiente em [platformio.ini](platformio.ini):
+
+- **Head**: lê os sensores (anel de 16 receptores TSSP, BNO055 e ultrassônicos), calcula a direção da bola e publica tudo por UART.
+- **Body**: recebe os dados do Head, lê os sensores de linha (LDR), decide a estratégia (atacante ou goleiro) e aciona motores e kicker. Também controla a IHM (OLED e botões) e estima a bateria.
+
+Essa separação evita que a leitura dos sensores atrase o controle dos motores. O código reutilizável fica em `src/General` e os cabeçalhos em `include/`.
+
+### Módulos
+
+| Módulo | Função |
+|--------|--------|
+| `TSSP` | Mede a atividade (% de tempo em LOW) dos 16 receptores IR em janelas de 5 ms |
+| `BNO055` | Orientação (rumo) e velocidade angular |
+| `Ultrassonicos` | Distâncias direita, frente, esquerda e trás |
+| `LDRFixed` / `FugaLinha` | Detecção da linha branca (15 LDRs via CD4067BM) e correção de trajetória |
+| `Omni` / `Motores` | Cinemática omnidirecional (4 motores) e acionamento PWM |
+| `PID` / `FuzzyPID` | Controle de rotação/orientação |
+| `Kicker` / `KickerLogica` | Chute por solenoide, com tempo de disparo, cooldown e bateria mínima |
+| `BatteryEstimator` | Estimativa do nível da bateria |
+| `IHM` | Menu em OLED e botões para escolher estratégia, limiares e testes |
+| `MovimentoBola` / `MovimentoDefesa` | Lógica pura de movimento do atacante e do goleiro |
+
+### Comunicação entre Placas
+
+Head e Body se comunicam por UART1 (TX = GPIO17, RX = GPIO18, 460800 baud, 8N1), com GND em comum. Os quadros estão definidos em [IRProtocol.h](include/IRProtocol.h) e são compactos (`pragma pack`):
+
+- `IRActivityPacket`: atividade dos 16 sensores, direção (décimos de grau), confiança (0–100) e flag de bola detectada;
+- `BNODataPacket`: rumo e velocidade angular;
+- `UltraDataPacket`: 4 distâncias e máscara de leituras válidas.
+
+Cada quadro tem *magic*, versão, número de sequência (descarta quadros antigos ou repetidos) e checksum XOR (descarta quadros corrompidos). Se nenhum quadro válido chega por um tempo, o Body para os motores.
+
+## Estratégia de Jogo
+
+O mesmo firmware do Body contém as duas estratégias; a escolha é feita na IHM. Cada uma usa um perfil próprio de limiares dos LDRs (`ConfigLDR::Ataque` e `ConfigLDR::Defesa`).
+
+### Atacante
+
+O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoBola.h](include/MovimentoBola.h)): quando a bola está à frente (até 45°), o robô avança em direção a ela; quando ela está ao lado ou atrás, ele contorna a bola em vez de ir direto, para não empurrá-la para trás e chegar alinhado ao gol. O desvio do contorno cresce com a proximidade da bola (7°, 10° e 25°). Com a bola à frente e o caminho livre, o kicker é acionado.
+
+### Goleiro
+
+O goleiro ([MovimentoDefesa.h](include/MovimentoDefesa.h)) mantém-se a cerca de 40 cm da parede traseira, medida pelo ultrassônico traseiro (com zona morta de 6 cm), e desloca-se lateralmente para ficar alinhado com a bola. A velocidade lateral aumenta com o ângulo da bola (zona morta de 2°). Ultrassônicos laterais limitam o afastamento da parede e ajudam a manter o robô centralizado, e os LDRs podem priorizar um avanço para evitar sair da área ou sair do campo.
+
+### Detecção da Bola
+
+O Head soma a atividade dos 16 receptores TSSP (espaçados de 22,5°) como vetores, depois de descontar um limiar de ruído. O resultado passa por um filtro exponencial (α = 0,25) para estabilizar a direção. A **confiança** é a razão entre o módulo do vetor e a soma dos pesos: leituras difusas (confiança < 0,15) são rejeitadas. A distância à bola é estimada pela atividade máxima e pelo número de sensores ativos ([ProximidadeIR.h](include/ProximidadeIR.h)).
+
+### Localização e Orientação
+
+O BNO055 fornece o rumo, usado pelo PID para manter o robô voltado ao gol adversário durante o deslocamento omnidirecional. Os quatro ultrassônicos dão a posição relativa às paredes do campo, usada principalmente pelo goleiro e pela seleção do lado do chute ([KickerLogica.h](include/KickerLogica.h)).
+
+### Fuga de Linha
+
+Os LDRs são divididos nas regiões esquerda, direita, inferior, superior (frente) e centro. Uma leitura acima do limiar (com histerese) indica linha branca. [FugaLinha](include/FugaLinha.h) calcula um vetor de correção que afasta o robô da linha e tem prioridade sobre a estratégia. Quando a linha sai dos sensores, usa a memória da última detecção periférica ou o fallback pelo centro, e o estado expira depois que a linha fica limpa.
+
+## Estrutura do Repositório
+
+```
+.
+├── platformio.ini        # Ambientes: Head, Body e testes
+├── Images/               # Fotos e logo
+├── include/              # Cabeçalhos (pinos, protocolo, lógica de movimento)
+└── src/
+    ├── Head/             # Firmware do Head (sensores)
+    ├── Body/             # Firmware do Body (estratégia e atuação)
+    ├── General/          # Drivers compartilhados (BNO055, TSSP, LDR, Motors, PID, Kicker, IHM...)
+    └── TESTS/            # Firmwares de teste de bancada
+```
+
+## Testes
+
+## Vídeo de Demonstração
+
+<video autoplay muted loop controls playsinline width=100%>
+  <source src="Images/Stone_Wolves_Soccer_Infrared.mp4" type="video/mp4">
+  Seu navegador não suporta a tag de vídeo.
+</video>
+
+## Resultados e Histórico
+
+## Agradecimentos
+
+## Contato
+
+### Instagram
+
+<a href='https://www.instagram.com/felipo.carv?lqvp=OTlyZW01Mm50bXlw' target='_blank'>@felipe.carv</a>

@@ -14,6 +14,7 @@
 #include <FugaLinha.h>
 #include <ConfigPinos.h>
 #include <Kicker.h>
+#include <ESPNowLink.h>
 #include <freertos/FreeRTOS.h>
 #include <esp_system.h>
 
@@ -67,7 +68,7 @@ namespace {
   constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
   constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
   constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
-  constexpr float VELOCIDADE_RECUO_LDR_INFERIOR = 0.18f;
+  constexpr float VELOCIDADE_RECUO_LDR_INFERIOR = 0.60f;
   struct QuadroRecebido {
     IRActivityPacket pacote;
     uint32_t recebidoEmMs;
@@ -835,6 +836,7 @@ void setup() {
   }
   Serial.println("Iniciando IHM.");
   IHM_begin();
+  ESPNowLink::begin();
   Serial.println("IHM inicializada; entrando no loop.");
 
   Serial.printf("Body UART1: %lu baud, 8N1, RX=18 TX=17.\n",
@@ -866,10 +868,17 @@ void loop() {
   atualizarLedUART();
   imprimirDiagnosticoUART();
   IHM_update();
-  const bool estrategiaAtaqueAtiva = IHM_estrategiaAtaqueAtiva();
-  const bool estrategiaDefesaAtiva = IHM_estrategiaDefesaAtiva();
-  const bool estrategiaDefesaExecutando =
-      estrategiaDefesaAtiva && !estrategiaAtaqueAtiva;
+  ESPNowLink::update();
+  const bool estrategiaAtaqueLocal = IHM_estrategiaAtaqueAtiva();
+  // Ataque cede lugar a defesa enquanto o parceiro informa RoboDefOn = false;
+  // timeout do vinculo nao conta como false, portanto o ataque segue normal.
+  const bool defesaSubstituiAtaque =
+      estrategiaAtaqueLocal && ESPNowLink::defesaParceiroDesligada();
+  const bool estrategiaAtaqueAtiva =
+      estrategiaAtaqueLocal && !defesaSubstituiAtaque;
+  const bool estrategiaDefesaAtiva =
+      IHM_estrategiaDefesaAtiva() || defesaSubstituiAtaque;
+  const bool estrategiaDefesaExecutando = estrategiaDefesaAtiva;
   if (!estrategiaDefesaExecutando && defesaRumoDefinida) {
     defesaRumoDefinida = false;
     ultimaCorrecaoRumo = 0.0f;

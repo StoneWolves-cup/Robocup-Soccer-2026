@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 namespace KickerLogica {
-constexpr uint32_t TEMPO_DISPARO_MS = 150;
+constexpr uint32_t TEMPO_DISPARO_MS = 400;
 constexpr uint32_t COOLDOWN_MS = 600;
 constexpr float BATERIA_MINIMA_PERCENTUAL = 40.0f;
 

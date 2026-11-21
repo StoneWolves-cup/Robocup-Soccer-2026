@@ -10,13 +10,20 @@ constexpr float ANGULO_LATERAL_GRAUS = 90.0f;
 constexpr float ANGULO_INICIO_J_TRASEIRO_GRAUS = 110.0f;
 constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
 constexpr float DESVIO_J_LONGE_GRAUS = 7.0f;
+constexpr float DESVIO_J_MEDIA_GRAUS = 10.0f;
 constexpr float DESVIO_J_PERTO_GRAUS = 25.0f;
 
 inline float calcularAnguloJ(float anguloBolaGraus, float proximidade) {
   if (proximidade < 0.0f) proximidade = 0.0f;
   if (proximidade > 1.0f) proximidade = 1.0f;
-  const float desvio = DESVIO_J_LONGE_GRAUS +
-      (DESVIO_J_PERTO_GRAUS - DESVIO_J_LONGE_GRAUS) * proximidade;
+  float desvio;
+  if (proximidade < 1.0f / 3.0f) {
+    desvio = DESVIO_J_LONGE_GRAUS;
+  } else if (proximidade < 2.0f / 3.0f) {
+    desvio = DESVIO_J_MEDIA_GRAUS;
+  } else {
+    desvio = DESVIO_J_PERTO_GRAUS;
+  }
   const float assinado = erroAngular(anguloBolaGraus, 0.0f);
   const float magnitude = fabsf(assinado);
   float movimento;

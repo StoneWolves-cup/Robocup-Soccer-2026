@@ -34,8 +34,8 @@ void encerrarDisparo(void *) {
 }
 
 bool pinosValidos() {
-  const int pinos[] = {IN_ESQUERDA, IN_DIREITA, FIM_CURSO_1, FIM_CURSO_2};
-  for (unsigned i = 0; i < 4; ++i) {
+  const int pinos[] = {IN_ESQUERDA, IN_DIREITA, FIM_CURSO};
+  for (unsigned i = 0; i < 3; ++i) {
     if (!GPIO_IS_VALID_GPIO(pinos[i]) ||
         (i < 2 && !GPIO_IS_VALID_OUTPUT_GPIO(pinos[i]))) return false;
     for (unsigned j = 0; j < i; ++j) {
@@ -44,19 +44,46 @@ bool pinosValidos() {
   }
   return true;
 }
+bool disparar(KickerLogica::Lado lado) {
+  portENTER_CRITICAL(&trava);
+  disparoPendente = true;
+  portEXIT_CRITICAL(&trava);
+  const esp_err_t resultado = esp_timer_start_once(
+      temporizador, KickerLogica::TEMPO_DISPARO_MS * 1000ULL);
+  if (resultado != ESP_OK) {
+    encerrarDisparo(nullptr);
+    temporizadorFalhou = true;
+    Serial.printf("ERRO: disparo do kicker cancelado: %s\n",
+                  esp_err_to_name(resultado));
+    return false;
+  }
+  portENTER_CRITICAL(&trava);
+  const bool acionado = disparoPendente;
+  if (acionado) {
+    digitalWrite(lado == KickerLogica::Lado::Esquerda ? IN_ESQUERDA : IN_DIREITA,
+                 HIGH);
+  }
+  portEXIT_CRITICAL(&trava);
+  if (!acionado) {
+    Serial.println("ERRO: temporizador expirou antes do acionamento do kicker.");
+    return false;
+  }
+  Serial.printf("Kicker: disparo %s.\n",
+                lado == KickerLogica::Lado::Esquerda ? "esquerdo" : "direito");
+  return true;
+}
 }  // namespace
 
 void Kicker::begin() {
   if (!pinosValidos()) {
-    Serial.println("Kicker desabilitado: defina quatro GPIOs validos e distintos.");
+    Serial.println("Kicker desabilitado: defina tres GPIOs validos e distintos.");
     return;
   }
   digitalWrite(IN_ESQUERDA, LOW);
   digitalWrite(IN_DIREITA, LOW);
   pinMode(IN_ESQUERDA, OUTPUT);
   pinMode(IN_DIREITA, OUTPUT);
-  pinMode(FIM_CURSO_1, INPUT_PULLDOWN);
-  pinMode(FIM_CURSO_2, INPUT_PULLDOWN);
+  pinMode(FIM_CURSO, INPUT_PULLDOWN);
 
   esp_timer_create_args_t argumentos{};
   argumentos.callback = encerrarDisparo;
@@ -101,36 +128,26 @@ void Kicker::atualizar(bool estrategiaAtiva, bool comunicacaoValida,
   informarBloqueio(nullptr);
   if (pendente || !KickerLogica::cooldownConcluido(disparou, fimMs, millis()))
     return;
-  if (digitalRead(FIM_CURSO_1) != HIGH && digitalRead(FIM_CURSO_2) != HIGH)
-    return;
+  if (digitalRead(FIM_CURSO) != HIGH) return;
   const KickerLogica::Lado lado = KickerLogica::selecionar(
       distancias[ULTRA_INDEX_FRONT], distancias[ULTRA_INDEX_LEFT],
       distancias[ULTRA_INDEX_RIGHT], true);
   if (lado == KickerLogica::Lado::Nenhum) return;
 
+  disparar(lado);
+}
+
+// Disparo manual de bancada pela IHM: ignora a estrategia e o fim de curso,
+// mas respeita disparo em andamento e cooldown.
+bool Kicker::dispararManual(bool direita) {
+  if (!temporizador || temporizadorFalhou) return false;
   portENTER_CRITICAL(&trava);
-  disparoPendente = true;
+  const bool pendente = disparoPendente;
+  const bool disparou = jaDisparou;
+  const uint32_t fimMs = fimDisparoMs;
   portEXIT_CRITICAL(&trava);
-  const esp_err_t resultado = esp_timer_start_once(
-      temporizador, KickerLogica::TEMPO_DISPARO_MS * 1000ULL);
-  if (resultado != ESP_OK) {
-    encerrarDisparo(nullptr);
-    temporizadorFalhou = true;
-    Serial.printf("ERRO: disparo do kicker cancelado: %s\n",
-                  esp_err_to_name(resultado));
-    return;
-  }
-  portENTER_CRITICAL(&trava);
-  const bool acionado = disparoPendente;
-  if (acionado) {
-    digitalWrite(lado == KickerLogica::Lado::Esquerda ? IN_ESQUERDA : IN_DIREITA,
-                 HIGH);
-  }
-  portEXIT_CRITICAL(&trava);
-  if (!acionado) {
-    Serial.println("ERRO: temporizador expirou antes do acionamento do kicker.");
-    return;
-  }
-  Serial.printf("Kicker: disparo %s.\n",
-                lado == KickerLogica::Lado::Esquerda ? "esquerdo" : "direito");
+  if (pendente || !KickerLogica::cooldownConcluido(disparou, fimMs, millis()))
+    return false;
+  return disparar(direita ? KickerLogica::Lado::Direita
+                          : KickerLogica::Lado::Esquerda);
 }

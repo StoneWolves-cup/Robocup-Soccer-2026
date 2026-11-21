@@ -63,7 +63,32 @@ struct ESPNowAckPacket {
   uint16_t sequence;
   uint8_t checksum;
 };
+// Pacote do vinculo ESP-NOW entre os robos. O MAC do remetente vem do proprio
+// ESP-NOW; defOn e o sinal RoboDefOn (true = parceiro executando a defesa).
+struct ESPNowLinkPacket {
+  uint16_t magic;
+  uint8_t version;
+  uint8_t type;
+  uint16_t sequence;
+  uint8_t role;
+  uint8_t defOn;
+  uint8_t checksum;
+};
 #pragma pack(pop)
+
+constexpr uint16_t ESPNOW_LINK_MAGIC = 0x4C4B;
+constexpr uint8_t ESPNOW_LINK_VERSION = 1;
+constexpr uint8_t ESPNOW_LINK_ANNOUNCE = 1;  // Broadcast: "estou online".
+constexpr uint8_t ESPNOW_LINK_PAIR = 2;      // Unicast: pedido de vinculo.
+constexpr uint8_t ESPNOW_LINK_PAIR_ACK = 3;  // Unicast: confirmacao do vinculo.
+constexpr uint8_t ESPNOW_LINK_STATE = 4;     // Unicast: heartbeat com RoboDefOn.
+
+inline uint8_t espNowLinkChecksum(const ESPNowLinkPacket &packet) {
+  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&packet);
+  uint8_t checksum = 0;
+  for (size_t i = 0; i < sizeof(ESPNowLinkPacket) - 1; ++i) checksum ^= bytes[i];
+  return checksum;
+}
 
 inline uint8_t irPacketChecksum(const IRActivityPacket &packet) {
   // Exclui o ultimo byte, reservado ao proprio checksum do quadro.

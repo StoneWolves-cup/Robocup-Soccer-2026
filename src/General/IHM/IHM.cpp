@@ -1,6 +1,7 @@
 #include <Wire.h>
 #include <U8g2lib.h>
 #include <BatteryEstimator.h>
+#include <Kicker.h>
 #include <MotoresTeste.h>
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
@@ -8,6 +9,7 @@
 #include <LDRFixed.h>
 #include <PID.h>
 #include <Preferences.h>
+#include <ESPNowLink.h>
 #include <math.h>
 
 // =====================================================
@@ -64,6 +66,7 @@ enum Tela {
   TELA_INFRA,
   TELA_LDR,
   TELA_LDR_AJUSTE,
+  TELA_MAC,
 
   TELA_TESTE_BNO,
   TELA_TESTE_TSSP,
@@ -104,7 +107,10 @@ uint8_t perfilLDRAtual = 0;
 // =====================================================
 
 int opcaoTelemetria = 0;
-const int totalTelemetria = 5;
+int opcaoKicker = 0;
+const char *mensagemKicker = nullptr;
+const int totalTelemetria = 6;
+int opcaoMac = 0;
 const uint8_t totalRegioesLDR = 4;
 const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF", "FRT"};
 uint16_t limiaresLDR[totalRegioesLDR] = {
@@ -144,7 +150,7 @@ constexpr uint16_t LIMIAR_LDR_MAXIMO = 4095;
 // 2 = ULTRASSONICOS
 // 3 = INFRA
 // 4 = LDR
-
+// 5 = MAC ADDRESS
 // =====================================================
 // MENU BNO
 // =====================================================
@@ -641,17 +647,20 @@ void mostrarMenuTelemetria() {
     "KICKER",
     "ULTRASSONICOS",
     "INFRA",
-    "LDR"
+    "LDR",
+    "MAC ADDRESS"
   };
 
+  // Seis itens nao cabem na tela; a lista rola mantendo a opcao visivel.
+  const int primeiroItem = opcaoTelemetria > 4 ? opcaoTelemetria - 4 : 0;
   for (
-    int i = 0;
-    i < totalTelemetria;
+    int i = primeiroItem;
+    i < totalTelemetria && i < primeiroItem + 5;
     i++
   ) {
 
     int y =
-      23 + i * 9;
+      23 + (i - primeiroItem) * 9;
 
     if (
       i == opcaoTelemetria
@@ -814,6 +823,25 @@ void mostrarUltra() {
     oled.drawStr(20, 35, "SEM DADOS UART");
   }
   oled.drawStr(4, 62, "VOLTAR = TELEMETRIA");
+  oled.sendBuffer();
+}
+
+// Telemetria do kicker: MEXER alterna entre esquerdo/direito e SELECIONAR
+// aciona o lado escolhido.
+void mostrarKicker() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(40, 9, "KICKER");
+  oled.drawHLine(8, 13, 112);
+  const char *nomes[] = {"KICKER ESQUERDO", "KICKER DIREITO"};
+  for (int i = 0; i < 2; ++i) {
+    const int y = 28 + i * 11;
+    if (i == opcaoKicker) oled.drawStr(4, y, ">");
+    oled.drawStr(14, y, nomes[i]);
+  }
+  oled.setFont(u8g2_font_5x8_tr);
+  if (mensagemKicker) oled.drawStr(4, 54, mensagemKicker);
+  oled.drawStr(4, 62, "MEXER=LADO SEL=CHUTAR");
   oled.sendBuffer();
 }
 
@@ -1453,6 +1481,64 @@ void mostrarLDR() {
   oled.sendBuffer();
 }
 
+// Exibe MAC local, MACs online e o estado do vinculo ESP-NOW com o outro robo.
+void formatarMac(char *saida, const uint8_t mac[6]) {
+  snprintf(saida, 18, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2],
+           mac[3], mac[4], mac[5]);
+}
+
+void mostrarMac() {
+  char texto[18];
+  uint8_t local[6];
+  ESPNowLink::macLocal(local);
+  formatarMac(texto, local);
+
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 8, "MAC ADDRESS LOCAL");
+  oled.drawStr(4, 17, texto);
+  oled.drawHLine(4, 20, 120);
+
+  uint8_t macs[ESPNowLink::MAX_CANDIDATOS][6];
+  const uint8_t total =
+      ESPNowLink::candidatosOnline(macs, ESPNowLink::MAX_CANDIDATOS);
+  if (total > 0 && opcaoMac >= total) opcaoMac = total - 1;
+
+  if (ESPNowLink::possuiVinculo()) {
+    uint8_t parceiro[6];
+    ESPNowLink::macVinculo(parceiro);
+    formatarMac(texto, parceiro);
+    if (ESPNowLink::conectado()) {
+      oled.drawStr(4, 30, "CONECTADO:");
+      oled.drawStr(4, 39, texto);
+      oled.drawStr(4, 48, ESPNowLink::defesaParceiroDesligada()
+                              ? "RoboDefOn: FALSE" : "RoboDefOn: TRUE");
+    } else {
+      oled.drawStr(4, 30, "CONEXAO SENDO DEFINIDA:");
+      oled.drawStr(4, 39, texto);
+    }
+    oled.drawStr(4, 62, "SELECIONAR = ESQUECER");
+  } else if (total == 0) {
+    oled.drawStr(4, 34, "NENHUM MAC ONLINE");
+  } else if (total == 1) {
+    formatarMac(texto, macs[0]);
+    oled.drawStr(4, 30, "1 MAC ADDRESS");
+    oled.drawStr(4, 39, "CONEXAO AUTOMATICA");
+    oled.drawStr(4, 48, texto);
+  } else {
+    const int primeiro = opcaoMac > 2 ? opcaoMac - 2 : 0;
+    for (int linha = 0; linha < 3 && primeiro + linha < total; ++linha) {
+      const int item = primeiro + linha;
+      const uint8_t y = 30 + linha * 9;
+      formatarMac(texto, macs[item]);
+      if (item == opcaoMac) oled.drawStr(2, y, ">");
+      oled.drawStr(10, y, texto);
+    }
+    oled.drawStr(4, 62, "MEXER=PROX SEL=ESCOLHER");
+  }
+  oled.sendBuffer();
+}
+
 // Exibe selecao de perfil e limiares perifericos; erros de NVS ficam visiveis
 // para que o operador saiba se o ajuste sobrevive a um reinicio.
 void mostrarLDRAjuste() {
@@ -1614,6 +1700,10 @@ void IHM_update() {
     } else if (tela == TELA_TELEMETRIA) {
       opcaoTelemetria = (opcaoTelemetria + 1) % totalTelemetria;
       mostrarMenuTelemetria();
+    } else if (tela == TELA_KICKER) {
+      opcaoKicker = (opcaoKicker + 1) % 2;
+      mensagemKicker = nullptr;
+      mostrarKicker();
     } else if (tela == TELA_MENU_BNO) {
       opcaoBNO = (opcaoBNO + 1) % totalBNO;
       mostrarMenuBNO();
@@ -1636,6 +1726,9 @@ void IHM_update() {
       mostrarLDRAjuste();
     } else if (tela == TELA_INFO_TESTE) {
       mostrarInfoTesteChecklist();
+    } else if (tela == TELA_MAC) {
+      opcaoMac++;
+      mostrarMac();
     }
   }
 
@@ -1664,6 +1757,7 @@ void IHM_update() {
         break;
       case TELA_ESTRATEGIA:
         tela = opcaoEstrategia == 0 ? TELA_ATAQUE : TELA_DEFESA;
+        ESPNowLink::iniciarBusca();
         if (tela == TELA_ATAQUE) {
           mostrarEstrategiaAtiva("ATAQUE ATIVO");
         } else {
@@ -1679,7 +1773,9 @@ void IHM_update() {
             break;
           case 1:
             tela = TELA_KICKER;
-            mostrarEmBreve("KICKER");
+            opcaoKicker = 0;
+            mensagemKicker = nullptr;
+            mostrarKicker();
             break;
           case 2:
             tela = TELA_ULTRA;
@@ -1689,11 +1785,36 @@ void IHM_update() {
             tela = TELA_INFRA;
             mostrarInfra();
             break;
-          default:
+          case 4:
             tela = TELA_LDR;
             mostrarLDR();
             break;
+          default:
+            tela = TELA_MAC;
+            opcaoMac = 0;
+            ESPNowLink::iniciarBusca();
+            mostrarMac();
+            break;
         }
+        break;
+      case TELA_MAC:
+        if (ESPNowLink::possuiVinculo()) {
+          ESPNowLink::esquecerVinculo();
+        } else {
+          uint8_t macs[ESPNowLink::MAX_CANDIDATOS][6];
+          const uint8_t total =
+              ESPNowLink::candidatosOnline(macs, ESPNowLink::MAX_CANDIDATOS);
+          if (total > 0) {
+            ESPNowLink::selecionarMac(macs[opcaoMac < total ? opcaoMac : 0]);
+          }
+        }
+        mostrarMac();
+        break;
+      case TELA_KICKER:
+        mensagemKicker = Kicker::dispararManual(opcaoKicker == 1)
+            ? "DISPARADO"
+            : "AGUARDE (COOLDOWN)";
+        mostrarKicker();
         break;
       case TELA_MENU_BNO:
         if (opcaoBNO == 0) {
@@ -1810,7 +1931,8 @@ void IHM_update() {
                tela == TELA_DEFESA) {
       tela = TELA_MENU;
       mostrarMenu();
-    } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR) {
+    } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR ||
+               tela == TELA_KICKER || tela == TELA_MAC) {
       ajustandoLDR = false;
       tela = TELA_TELEMETRIA;
       mostrarMenuTelemetria();
@@ -1844,7 +1966,15 @@ void IHM_update() {
     else if (tela == TELA_TESTE_BNO) mostrarTesteBNOMove();
     else if (tela == TELA_TESTE_TSSP) mostrarTesteTSSP();
     else if (tela == TELA_INFO_TESTE) mostrarInfoTesteChecklist();
+    else if (tela == TELA_MAC) mostrarMac();
   }
+
+  // RoboDefOn acompanha a tela: so e true na defesa; ao voltar dela vira false.
+  ESPNowLink::definirEstadoLocal(
+      tela == TELA_ATAQUE ? ESPNowLink::Papel::Ataque
+      : tela == TELA_DEFESA ? ESPNowLink::Papel::Defesa
+                            : ESPNowLink::Papel::Nenhum,
+      tela == TELA_DEFESA);
 
   estadoAnteriorSelecionar = selecionar;
   estadoAnteriorMexer = mexer;

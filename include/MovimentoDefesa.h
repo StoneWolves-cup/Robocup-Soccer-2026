@@ -6,23 +6,33 @@
 
 namespace MovimentoDefesa {
 constexpr float DISTANCIA_ALVO_CM = 40.0f;
-constexpr float ZONA_MORTA_DISTANCIA_CM = 6.0f;
-constexpr float GANHO_DISTANCIA = 0.12f;
-constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.80f;
-constexpr float VELOCIDADE_LATERAL_MINIMA = 0.65f;
+constexpr float ZONA_MORTA_DISTANCIA_CM = 4.0f;
+constexpr float GANHO_DISTANCIA = 0.10f;
+constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.70f;
+constexpr float VELOCIDADE_LATERAL_MINIMA = 0.50f;
 constexpr float VELOCIDADE_LATERAL_MAXIMA = 0.90f;
-constexpr float ANGULO_ZONA_MORTA_GRAUS = 2.0f;
-constexpr float ANGULO_RESPOSTA_FORTE_GRAUS = 6.0f;
+constexpr float ANGULO_ZONA_MORTA_GRAUS = 2.6f;
+constexpr float ANGULO_RESPOSTA_FORTE_GRAUS = 3.0f;
 constexpr float ANGULO_MAXIMO_LATERAL_GRAUS = 100.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MIN_CM = 48.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MAX_CM = 113.0f;
 constexpr float DISTANCIA_CENTRO_U1_MIN_CM = 65.0f;
 constexpr float DISTANCIA_CENTRO_U1_MAX_CM = 75.0f;
-constexpr float VELOCIDADE_CENTRO_MINIMA = 0.50f;
-constexpr float GANHO_CENTRO_U1 = 0.03f;
-constexpr float VELOCIDADE_CENTRO_MAXIMA = 0.70f;
-constexpr float DISTANCIA_LIMITE_LATERAL_CM = 43.0f;
-constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.12f;
+constexpr float VELOCIDADE_CENTRO_MINIMA = 0.70f;
+constexpr float GANHO_CENTRO_U1 = 0.04f;
+constexpr float VELOCIDADE_CENTRO_MAXIMA = 0.80f;
+constexpr float DISTANCIA_LIMITE_LATERAL_CM = 30.0f;
+constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.75f;
+constexpr float DISTANCIA_ATIVACAO_AVANCO_LDR_CM = 25.0f; 
+
+inline bool priorizarAvancoLDR(
+    float distanciaTraseiraCm, bool leituraValida, bool superiorBranco,
+    bool centroBranco, bool avancoAtivo) {
+  if (!leituraValida || !isfinite(distanciaTraseiraCm)) return false;
+  if (avancoAtivo) return distanciaTraseiraCm < DISTANCIA_ALVO_CM;
+  return distanciaTraseiraCm <= DISTANCIA_ATIVACAO_AVANCO_LDR_CM &&
+      (superiorBranco || centroBranco);
+}
 
 inline float comandoDistancia(float distanciaCm) {
   const float erroCm = distanciaCm - DISTANCIA_ALVO_CM;

@@ -14,6 +14,12 @@ a potência pela confiança, limitada a 30%. Os motores param quando um quadro
 válido indica ausência da bola ou quando nenhum quadro válido chega por 100 ms.
 Confirme a pinagem dos sensores e o sentido de cada motor antes do teste físico.
 
+# Teste isolado do ultrassônico
+
+O firmware `ultrassom-test` lê apenas um sensor ultrassônico: TRIG no GPIO10
+e ECHO no GPIO11. Compile e grave com `pio run -e ultrassom-test -t upload`;
+abra o monitor com `pio device monitor -e ultrassom-test`.
+
 # Teste LDR com limiares fixos
 
 O firmware `ldr-fixed-test` usa os 15 LDRs no CD4067BM: SIG no GPIO14 e S0-S3
@@ -77,15 +83,23 @@ expirada bloqueia os motores.
 
 ## Kicker duplo
 
-O kicker fica desabilitado enquanto os quatro GPIOs em `ConfigPinos::Body::Kicker`
-estiverem indefinidos. Antes de usá-lo, defina pinos disponíveis e distintos,
-confira conflitos com os demais componentes e valide as ligações em bancada:
-as entradas IN da CDI são ativas em HIGH e os fins de curso são ativos em HIGH
-com `INPUT_PULLDOWN`. O firmware mantém as saídas em LOW quando desabilitadas;
+O firmware de bancada `pio run -e kicker-test` roda no Body e recebe os
+ultrassônicos pelo firmware Head conectado à UART1 (TX 17 e RX 18, GND comum).
+Para gravar, use `pio run -e kicker-test -t upload`; abra o monitor com
+`pio device monitor -e kicker-test`. Este teste não usa a IHM nem exige IR e
+BNO: com os GPIOs configurados, pode chutar automaticamente ao pressionar um
+fim de curso. Faça o teste em área segura, sem pessoas na direção do chute.
+
+O kicker fica desabilitado enquanto os três GPIOs em `ConfigPinos::Body::Kicker`
+(`IN_ESQUERDA`, `IN_DIREITA` e `FIM_CURSO`) estiverem indefinidos. Antes de usá-lo,
+defina pinos disponíveis e distintos, confira conflitos com os demais componentes e
+valide as ligações em bancada: as entradas IN da CDI são ativas em HIGH e o fim de
+curso unificado (um único pino para os dois fins de curso) é ativo em HIGH com
+`INPUT_PULLDOWN`. O firmware mantém as saídas em LOW quando desabilitadas;
 use pull-downs externos nas entradas da CDI para evitar acionamentos durante
 boot ou reset, antes da configuração dos GPIOs.
 
-Em ataque ou defesa, qualquer fim de curso pressionado permite selecionar o
+Em ataque ou defesa, o fim de curso unificado acionado permite selecionar o
 chute. Os ultrassônicos são U1/direita, U2/frente, U3/esquerda e U4/trás.
 Com frente acima de 80 cm, esquerda abaixo de 65 cm seleciona o kicker
 esquerdo, direita abaixo de 65 cm o direito; na faixa central ou quando ambas
@@ -96,7 +110,7 @@ estar ativa. Não há inferência de um sensor a partir do outro.
 
 Bateria sem leitura válida ou abaixo de 40% bloqueia o chute; perda de
 condições durante o pulso desliga as saídas. Cada pulso tem duração nominal
-de 150 ms, encerrado por temporizador independente do loop, seguido por
+de 400 ms, encerrado por temporizador independente do loop, seguido por
 600 ms de cooldown global. O temporizador é de software e não substitui uma
 proteção elétrica independente contra pulso prolongado. Enquanto um fim de
 curso continuar pressionado, um novo chute pode ocorrer após o cooldown se as
@@ -150,6 +164,17 @@ Teste primeiro com o robô suspenso e depois em área delimitada.
 
 O teste local dos cálculos pode ser executado com
 `g++ -std=c++11 -I include src/TESTS/TEST_PROXIMIDADE_IR/test.cpp -o /tmp/test-proximidade-ir && /tmp/test-proximidade-ir`.
+
+## Avanço prioritário da defesa
+
+Na defesa, U4 <= 25 cm com Superior ou Centro branco ativa um avanço frontal
+que permanece prioritário até U4 atingir 40 cm. Enquanto o estado estiver
+ativo, correções das regiões LDR são ignoradas, mas o controle lateral normal
+da defesa e a correção de rumo continuam. Leitura inválida de U4 encerra o
+estado e para o movimento com segurança.
+
+O teste local dessa decisão pode ser executado com
+`g++ -std=c++11 -I include src/TESTS/TEST_MOVIMENTO_DEFESA/test.cpp -o /tmp/test-movimento-defesa && /tmp/test-movimento-defesa`.
 
 Teste do kicker (nativo, via PlatformIO): `pio run -e kicker-test && .pio/build/kicker-test/program`.
 
