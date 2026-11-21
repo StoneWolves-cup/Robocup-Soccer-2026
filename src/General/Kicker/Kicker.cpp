@@ -25,8 +25,8 @@ void informarBloqueio(const char *motivo) {
 
 void encerrarDisparo(void *) {
   portENTER_CRITICAL(&trava);
-  digitalWrite(IN_ESQUERDA, LOW);
-  digitalWrite(IN_DIREITA, LOW);
+  digitalWrite(IN_ESQUERDA, HIGH);
+  digitalWrite(IN_DIREITA, HIGH);
   fimDisparoMs = millis();
   jaDisparou = true;
   disparoPendente = false;
@@ -61,7 +61,7 @@ bool disparar(KickerLogica::Lado lado) {
   const bool acionado = disparoPendente;
   if (acionado) {
     digitalWrite(lado == KickerLogica::Lado::Esquerda ? IN_ESQUERDA : IN_DIREITA,
-                 HIGH);
+                 LOW);
   }
   portEXIT_CRITICAL(&trava);
   if (!acionado) {
