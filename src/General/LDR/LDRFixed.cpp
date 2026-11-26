@@ -77,6 +77,14 @@ uint16_t LDRFixed::getAverage(Regiao regiao) const {
     return 0;
 }
 
+uint16_t LDRFixed::getCenterSensorReading(uint8_t index) const {
+    return index < CENTER_SENSOR_COUNT ? _centerSensorReadings[index] : 0;
+}
+
+uint16_t LDRFixed::getCenterSensorThreshold(uint8_t index) const {
+    return index < CENTER_SENSOR_COUNT ? _centerSensorThresholds[index] : 0;
+}
+
 // Atualiza somente as regioes perifericas para preservar configuracao do centro.
 void LDRFixed::setThresholds(uint16_t esquerda, uint16_t direita,
                             uint16_t inferior, uint16_t superior) {
@@ -151,6 +159,7 @@ void LDRFixed::update() {
     uint8_t sensoresCentroBrancos = 0;
     for (uint8_t i = 0; i < CENTER_SENSOR_COUNT; ++i) {
         const uint8_t canal = CHANNELS_CENTER[i];
+        _centerSensorReadings[i] = leituras[canal];
         if (!_classificacaoInicializada) {
             _sensoresCentroBrancos[canal] =
                 leituras[canal] > _centerSensorThresholds[i];

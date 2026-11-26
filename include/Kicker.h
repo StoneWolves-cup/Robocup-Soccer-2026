@@ -4,8 +4,15 @@
 #include <stdint.h>
 
 namespace Kicker {
+enum class ModoAutomatico {
+  Desativado,
+  ComUltrassom,
+  AtaqueUltrassomDireito,
+  FimDeCurso
+};
+
 void begin();
-void atualizar(bool estrategiaAtiva, bool comunicacaoValida,
+void atualizar(ModoAutomatico modo, bool comunicacaoValida,
                bool bateriaValida, float bateriaPercentual,
                bool ultraValido, const float distancias[4],
                uint8_t mascaraUltra);

@@ -31,6 +31,9 @@ public:
     uint16_t getThreshold(Regiao regiao) const;
     // Retorna a media mais recente usada para classificar a regiao.
     uint16_t getAverage(Regiao regiao) const;
+    // Retorna leitura e limiar mais recentes de um sensor central (indices 0-6).
+    uint16_t getCenterSensorReading(uint8_t index) const;
+    uint16_t getCenterSensorThreshold(uint8_t index) const;
     // Ajusta os quatro limiares editaveis pela IHM.
     void setThresholds(uint16_t esquerda, uint16_t direita, uint16_t inferior,
                        uint16_t superior);
@@ -50,6 +53,7 @@ private:
 
     uint16_t _thresholds[QuantidadeRegioes] = {};
     uint16_t _averages[QuantidadeRegioes] = {};
+    uint16_t _centerSensorReadings[7] = {};
     uint16_t _centerSensorThresholds[7] = {};
     uint16_t _centerHysteresisMargin = 0;
     bool _regioesBrancas[QuantidadeRegioes] = {};

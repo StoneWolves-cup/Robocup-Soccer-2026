@@ -2,12 +2,14 @@
 #include <driver/gpio.h>
 
 namespace {
-constexpr uint32_t TIMEOUT_ECHO_US = 25000;
+constexpr uint32_t TIMEOUT_ECHO_US = 5000;
 
 volatile uint32_t inicioPulsoUs[Ultrassonicos::QUANTIDADE] = {};
 volatile uint32_t duracaoPulsoUs[Ultrassonicos::QUANTIDADE] = {};
 volatile bool pulsoIniciado[Ultrassonicos::QUANTIDADE] = {};
 volatile bool leituraConcluida[Ultrassonicos::QUANTIDADE] = {};
+bool leituraEmAndamento = false;
+uint32_t inicioLeituraUs = 0;
 
 void IRAM_ATTR registrarBorda(uint8_t indice, int nivel) {
   const uint32_t agora = micros();
@@ -59,8 +61,9 @@ void Ultrassonicos::begin() {
   attachInterrupt(digitalPinToInterrupt(PINOS_ECHO[3]), eco4Mudou, CHANGE);
 }
 
-void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
-                        bool leiturasValidas[QUANTIDADE]) {
+void Ultrassonicos::iniciarLeitura() {
+  if (leituraEmAndamento) return;
+
   noInterrupts();
   for (uint8_t i = 0; i < QUANTIDADE; ++i) {
     inicioPulsoUs[i] = 0;
@@ -75,18 +78,27 @@ void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
   digitalWrite(PINO_TRIG, HIGH);
   delayMicroseconds(10);
   digitalWrite(PINO_TRIG, LOW);
+  inicioLeituraUs = micros();
+  leituraEmAndamento = true;
+}
 
-  const uint32_t inicioEspera = micros();
-  while ((uint32_t)(micros() - inicioEspera) < TIMEOUT_ECHO_US) {
-    bool todosConcluidos = true;
-    for (uint8_t i = 0; i < QUANTIDADE; ++i) {
-      if (!leituraConcluida[i]) {
-        todosConcluidos = false;
-        break;
-      }
+bool Ultrassonicos::atualizar(float distanciasCm[QUANTIDADE],
+                              bool leiturasValidas[QUANTIDADE]) {
+  if (!leituraEmAndamento) return false;
+
+  bool todosConcluidos = true;
+  noInterrupts();
+  for (uint8_t i = 0; i < QUANTIDADE; ++i) {
+    if (!leituraConcluida[i]) {
+      todosConcluidos = false;
+      break;
     }
-    if (todosConcluidos) break;
-    delay(1);
+  }
+  interrupts();
+
+  if (!todosConcluidos &&
+      (uint32_t)(micros() - inicioLeituraUs) < TIMEOUT_ECHO_US) {
+    return false;
   }
 
   noInterrupts();
@@ -94,6 +106,19 @@ void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
     distanciasCm[i] = duracaoPulsoUs[i] * 0.0343f / 2.0f;
     leiturasValidas[i] = leituraConcluida[i] &&
         distanciasCm[i] >= 2.0f && distanciasCm[i] <= 430.0f;
+    leituraConcluida[i] = false;
+    pulsoIniciado[i] = false;
   }
   interrupts();
+  leituraEmAndamento = false;
+  return true;
+}
+
+// Compatibilidade para chamadores antigos; o Head usa a API nao bloqueante.
+void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
+                        bool leiturasValidas[QUANTIDADE]) {
+  iniciarLeitura();
+  while (!atualizar(distanciasCm, leiturasValidas)) {
+    delay(20);
+  }
 }

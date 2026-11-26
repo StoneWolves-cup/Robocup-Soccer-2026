@@ -9,10 +9,14 @@
 namespace {
 using namespace ConfigPinos::Body::Kicker;
 
+constexpr uint8_t NIVEL_KICKER_ATIVADO = LOW;
+constexpr uint8_t NIVEL_KICKER_DESATIVADO = HIGH;
+
 esp_timer_handle_t temporizador = nullptr;
 bool temporizadorFalhou = false;
 portMUX_TYPE trava = portMUX_INITIALIZER_UNLOCKED;
 bool disparoPendente = false;
+bool disparoAutomatico = false;
 bool jaDisparou = false;
 uint32_t fimDisparoMs = 0;
 const char *ultimoBloqueio = nullptr;
@@ -25,11 +29,12 @@ void informarBloqueio(const char *motivo) {
 
 void encerrarDisparo(void *) {
   portENTER_CRITICAL(&trava);
-  digitalWrite(IN_ESQUERDA, HIGH);
-  digitalWrite(IN_DIREITA, HIGH);
+  digitalWrite(IN_ESQUERDA, NIVEL_KICKER_DESATIVADO);
+  digitalWrite(IN_DIREITA, NIVEL_KICKER_DESATIVADO);
   fimDisparoMs = millis();
   jaDisparou = true;
   disparoPendente = false;
+  disparoAutomatico = false;
   portEXIT_CRITICAL(&trava);
 }
 
@@ -44,9 +49,12 @@ bool pinosValidos() {
   }
   return true;
 }
-bool disparar(KickerLogica::Lado lado) {
+bool disparar(KickerLogica::Lado lado, bool automatico) {
   portENTER_CRITICAL(&trava);
+  digitalWrite(IN_ESQUERDA, NIVEL_KICKER_DESATIVADO);
+  digitalWrite(IN_DIREITA, NIVEL_KICKER_DESATIVADO);
   disparoPendente = true;
+  disparoAutomatico = automatico;
   portEXIT_CRITICAL(&trava);
   const esp_err_t resultado = esp_timer_start_once(
       temporizador, KickerLogica::TEMPO_DISPARO_MS * 1000ULL);
@@ -60,16 +68,25 @@ bool disparar(KickerLogica::Lado lado) {
   portENTER_CRITICAL(&trava);
   const bool acionado = disparoPendente;
   if (acionado) {
-    digitalWrite(lado == KickerLogica::Lado::Esquerda ? IN_ESQUERDA : IN_DIREITA,
-                 LOW);
+    if (lado == KickerLogica::Lado::Esquerda ||
+        lado == KickerLogica::Lado::Ambos) {
+      digitalWrite(IN_ESQUERDA, NIVEL_KICKER_ATIVADO);
+    }
+    if (lado == KickerLogica::Lado::Direita ||
+        lado == KickerLogica::Lado::Ambos) {
+      digitalWrite(IN_DIREITA, NIVEL_KICKER_ATIVADO);
+    }
   }
   portEXIT_CRITICAL(&trava);
   if (!acionado) {
     Serial.println("ERRO: temporizador expirou antes do acionamento do kicker.");
     return false;
   }
-  Serial.printf("Kicker: disparo %s.\n",
-                lado == KickerLogica::Lado::Esquerda ? "esquerdo" : "direito");
+  const char *ladoTexto =
+      lado == KickerLogica::Lado::Esquerda ? "esquerdo"
+      : lado == KickerLogica::Lado::Direita ? "direito"
+      : "duplo";
+  Serial.printf("Kicker: disparo %s.\n", ladoTexto);
   return true;
 }
 }  // namespace
@@ -79,8 +96,16 @@ void Kicker::begin() {
     Serial.println("Kicker desabilitado: defina tres GPIOs validos e distintos.");
     return;
   }
-  digitalWrite(IN_ESQUERDA, LOW);
-  digitalWrite(IN_DIREITA, LOW);
+  const esp_err_t resultadoEsquerda = gpio_set_level(
+      static_cast<gpio_num_t>(IN_ESQUERDA), NIVEL_KICKER_DESATIVADO);
+  const esp_err_t resultadoDireita = gpio_set_level(
+      static_cast<gpio_num_t>(IN_DIREITA), NIVEL_KICKER_DESATIVADO);
+  if (resultadoEsquerda != ESP_OK || resultadoDireita != ESP_OK) {
+    Serial.printf("ERRO: nao foi possivel inicializar saidas do kicker: %s / %s\n",
+                  esp_err_to_name(resultadoEsquerda),
+                  esp_err_to_name(resultadoDireita));
+    return;
+  }
   pinMode(IN_ESQUERDA, OUTPUT);
   pinMode(IN_DIREITA, OUTPUT);
   pinMode(FIM_CURSO, INPUT_PULLDOWN);
@@ -96,48 +121,68 @@ void Kicker::begin() {
   }
 }
 
-void Kicker::atualizar(bool estrategiaAtiva, bool comunicacaoValida,
+void Kicker::atualizar(ModoAutomatico modo, bool comunicacaoValida,
                        bool bateriaValida, float bateriaPercentual,
                        bool ultraValido, const float distancias[4],
                        uint8_t mascaraUltra) {
   if (!temporizador || temporizadorFalhou) return;
   const bool bateriaOk =
       KickerLogica::bateriaPermite(bateriaValida, bateriaPercentual);
-  const uint8_t mascaraNecessaria = (1U << ULTRA_INDEX_FRONT) |
-      (1U << ULTRA_INDEX_LEFT) | (1U << ULTRA_INDEX_RIGHT);
+  const bool modoAtaquePersonalizado =
+      modo == ModoAutomatico::AtaqueUltrassomDireito;
+  const uint8_t mascaraNecessaria = modoAtaquePersonalizado
+      ? (1U << ULTRA_INDEX_RIGHT)
+      : (1U << ULTRA_INDEX_FRONT) | (1U << ULTRA_INDEX_LEFT) |
+            (1U << ULTRA_INDEX_RIGHT);
   const bool ultrasOk = ultraValido &&
       (mascaraUltra & mascaraNecessaria) == mascaraNecessaria &&
-      KickerLogica::distanciaValida(distancias[ULTRA_INDEX_FRONT]) &&
-      KickerLogica::distanciaValida(distancias[ULTRA_INDEX_LEFT]) &&
-      KickerLogica::distanciaValida(distancias[ULTRA_INDEX_RIGHT]);
+      KickerLogica::distanciaValida(distancias[ULTRA_INDEX_RIGHT]) &&
+      (modoAtaquePersonalizado ||
+       (KickerLogica::distanciaValida(distancias[ULTRA_INDEX_FRONT]) &&
+        KickerLogica::distanciaValida(distancias[ULTRA_INDEX_LEFT])));
+  const bool modoAtivo = modo != ModoAutomatico::Desativado;
+  const bool precisaUltrassom = modo == ModoAutomatico::ComUltrassom ||
+      modoAtaquePersonalizado;
 
   portENTER_CRITICAL(&trava);
   const bool pendente = disparoPendente;
   const bool disparou = jaDisparou;
   const uint32_t fimMs = fimDisparoMs;
-  if (!estrategiaAtiva || !comunicacaoValida || !bateriaOk || !ultrasOk) {
-    digitalWrite(IN_ESQUERDA, LOW);
-    digitalWrite(IN_DIREITA, LOW);
+  if (disparoAutomatico &&
+      (!modoAtivo || !bateriaOk ||
+       (precisaUltrassom && (!comunicacaoValida || !ultrasOk)))) {
+    digitalWrite(IN_ESQUERDA, NIVEL_KICKER_DESATIVADO);
+    digitalWrite(IN_DIREITA, NIVEL_KICKER_DESATIVADO);
   }
   portEXIT_CRITICAL(&trava);
 
-  if (!estrategiaAtiva) { informarBloqueio("estrategia inativa"); return; }
-  if (!comunicacaoValida) { informarBloqueio("UART desconectada"); return; }
+  if (!modoAtivo) { informarBloqueio("modo automatico inativo"); return; }
+  if (precisaUltrassom && !comunicacaoValida) {
+    informarBloqueio("UART desconectada"); return;
+  }
   if (!bateriaOk) { informarBloqueio("bateria invalida ou abaixo de 40%"); return; }
-  if (!ultrasOk) { informarBloqueio("ultrassonicos invalidos ou expirados"); return; }
+  if (precisaUltrassom && !ultrasOk) {
+    informarBloqueio("ultrassonicos invalidos ou expirados"); return;
+  }
   informarBloqueio(nullptr);
   if (pendente || !KickerLogica::cooldownConcluido(disparou, fimMs, millis()))
     return;
-  if (digitalRead(FIM_CURSO) != HIGH) return;
-  const KickerLogica::Lado lado = KickerLogica::selecionar(
-      distancias[ULTRA_INDEX_FRONT], distancias[ULTRA_INDEX_LEFT],
-      distancias[ULTRA_INDEX_RIGHT], true);
-  if (lado == KickerLogica::Lado::Nenhum) return;
-
-  disparar(lado);
+  if (!modoAtaquePersonalizado && digitalRead(FIM_CURSO) != HIGH) return;
+  KickerLogica::Lado lado = KickerLogica::Lado::Ambos;
+  if (modoAtaquePersonalizado) {
+    const bool leituraDireitaValida = ultraValido &&
+        (mascaraUltra & (1U << ULTRA_INDEX_RIGHT)) != 0;
+    lado = KickerLogica::selecionarAtaque(
+        distancias[ULTRA_INDEX_RIGHT], leituraDireitaValida);
+  } else if (modo == ModoAutomatico::ComUltrassom) {
+    lado = KickerLogica::selecionar(
+        distancias[ULTRA_INDEX_FRONT], distancias[ULTRA_INDEX_LEFT],
+        distancias[ULTRA_INDEX_RIGHT], true);
+  }
+  if (lado != KickerLogica::Lado::Nenhum) disparar(lado, true);
 }
 
-// Disparo manual de bancada pela IHM: ignora a estrategia e o fim de curso,
+// Disparo manual pela IHM: ignora a estrategia e o fim de curso,
 // mas respeita disparo em andamento e cooldown.
 bool Kicker::dispararManual(bool direita) {
   if (!temporizador || temporizadorFalhou) return false;
@@ -149,5 +194,5 @@ bool Kicker::dispararManual(bool direita) {
   if (pendente || !KickerLogica::cooldownConcluido(disparou, fimMs, millis()))
     return false;
   return disparar(direita ? KickerLogica::Lado::Direita
-                          : KickerLogica::Lado::Esquerda);
+                          : KickerLogica::Lado::Esquerda, false);
 }

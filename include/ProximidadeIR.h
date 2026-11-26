@@ -10,8 +10,9 @@ constexpr uint8_t LIMIAR_SENSOR_ATIVO = 2;
 constexpr float ATIVIDADE_LONGE = 2.0f;
 constexpr float ATIVIDADE_PERTO = 25.0f;
 constexpr float SENSORES_LONGE = 1.0f;
-constexpr float SENSORES_PERTO = 6.0f;
+constexpr float SENSORES_PERTO = 5.0f;
 constexpr float FILTRO_ALPHA = 0.2f;
+constexpr float INDICE_MINIMO_PERTO = 2.0f / 3.0f;
 
 struct Estimativa {
   float indice = 0.0f;
@@ -61,7 +62,11 @@ class Filtro {
 
 inline const char *descricao(float indice) {
   return indice < 1.0f / 3.0f ? "LONGE" :
-         indice < 2.0f / 3.0f ? "MEDIA" : "PERTO";
+         indice < INDICE_MINIMO_PERTO ? "MEDIA" : "PERTO";
+}
+
+inline bool estaPerto(float indice) {
+  return indice >= INDICE_MINIMO_PERTO;
 }
 }  // namespace ProximidadeIR
 

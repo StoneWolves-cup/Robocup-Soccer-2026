@@ -2,9 +2,9 @@
 #include <MotoresTeste.h>
 
 namespace {
-constexpr uint32_t TEMPO_MOVIMENTO_MS = 5000;
+constexpr uint32_t TEMPO_MOVIMENTO_MS = 2000;
 constexpr uint32_t TEMPO_PARADO_MS = 1000;
-constexpr float POTENCIA_TESTE = 0.35f;
+constexpr float POTENCIA_TESTE = 1.0f;
 
 void executarMovimento(Motores &motores, Omni &omni, const char *nome,
                        float x, float y) {

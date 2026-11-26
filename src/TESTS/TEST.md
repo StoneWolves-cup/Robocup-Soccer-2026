@@ -54,12 +54,14 @@ correção. Se o sensor frontal físico não for o C0, troque-o em
 em `ConfigLDR.h`. O limiar padrão de FRT é a média dos antigos limiares de C0 e
 C14 e deve ser recalibrado no campo.
 
-Na mesma tela é possível ajustar ESQ, DIR, INF e FRT em passos de 5: selecione a
-região, use SELECIONAR para aumentar ou MEXER para diminuir e VOLTAR para
-sair. Os ajustes são salvos para o perfil ativo; selecionar novamente um
-limiar restaura seus valores padrão. Após apagar a flash, o padrão inicial é
-LIMIAR 1. Se a tela mostrar `ERRO NO NVS`, a alteração está aplicada em
-memória, mas pode não ser preservada após reiniciar; consulte o monitor serial.
+Na mesma tela é possível ajustar ESQ, DIR, INF e FRT em passos de 10. Selecione
+a região e use SELECIONAR para aumentar ou MEXER para diminuir. A opção CENTRO
+abre S1-S7; selecione um sensor para ver e ajustar seu limiar também em passos
+de 10. Durante o ajuste, VOLTAR retorna à lista de sensores. Os ajustes são
+salvos para o perfil ativo; selecionar novamente um limiar restaura seus valores
+padrão. Após apagar a flash, o padrão inicial é LIMIAR 1. Se a tela mostrar
+`ERRO NO NVS`, a alteração está aplicada em memória, mas pode não ser preservada
+após reiniciar; consulte o monitor serial.
 
 ## Comportamento da defesa
 
@@ -81,37 +83,80 @@ correção de rumo do BNO, nunca do ângulo da bola. Sem bola válida, mantém a
 distância e o rumo, sem deslocamento lateral. Uma leitura traseira inválida ou
 expirada bloqueia os motores.
 
+Quando a bola permanece detectada, classificada como `PERTO` e dentro de ±10°
+do eixo frontal por 2 s, a defesa faz um avanço apontado para a bola durante
+800 ms. Depois dos 800 ms, retorna ao controle padrão da defesa e inicia um
+cooldown de 10 s. O avanço exige IR válido, mantém a correção de rumo do BNO e
+continua sujeito aos limites laterais; a perda da bola ou da proximidade
+durante a espera reinicia a estabilidade angular.
+
+O acompanhamento angular usa uma zona morta adaptativa: aproximadamente 0,1°
+quando a bola está longe, aumentando de forma exponencial até 12° quando o
+índice de proximidade chega ao máximo. O mesmo limiar adaptativo é usado para a
+estabilidade angular que precede o avanço.
+Em `src/Body/main.cpp`, `HABILITAR_AVANCO_BOLA_DEFESA` habilita esse avanço
+quando `true`; com `false`, a defesa continua funcionando sem o avanço
+temporizado. A alteração exige recompilar o firmware.
+
 ## Kicker duplo
 
-O firmware de bancada `pio run -e kicker-test` roda no Body e recebe os
-ultrassônicos pelo firmware Head conectado à UART1 (TX 17 e RX 18, GND comum).
-Para gravar, use `pio run -e kicker-test -t upload`; abra o monitor com
-`pio device monitor -e kicker-test`. Este teste não usa a IHM nem exige IR e
-BNO: com os GPIOs configurados, pode chutar automaticamente ao pressionar um
-fim de curso. Faça o teste em área segura, sem pessoas na direção do chute.
+O firmware de bancada `pio run -e kicker-test` alterna o relé direito a cada
+segundo, sem consultar os sensores. Ele usa o mesmo GPIO 40 (`IN_DIREITA`)
+e a mesma polaridade ativa em LOW do firmware Body. Para gravar, use
+`pio run -e kicker-test -t upload`; o monitor serial usa 115200 baud.
+O firmware Body também permite disparos manuais pela IHM.
 
-O kicker fica desabilitado enquanto os três GPIOs em `ConfigPinos::Body::Kicker`
-(`IN_ESQUERDA`, `IN_DIREITA` e `FIM_CURSO`) estiverem indefinidos. Antes de usá-lo,
-defina pinos disponíveis e distintos, confira conflitos com os demais componentes e
-valide as ligações em bancada: as entradas IN da CDI são ativas em HIGH e o fim de
-curso unificado (um único pino para os dois fins de curso) é ativo em HIGH com
-`INPUT_PULLDOWN`. O firmware mantém as saídas em LOW quando desabilitadas;
-use pull-downs externos nas entradas da CDI para evitar acionamentos durante
-boot ou reset, antes da configuração dos GPIOs.
+No Body, selecione **Telemetria > Kicker Auto** para executar o teste
+automático com os motores parados. A tela mostra o estado do fim de curso, as
+distâncias direita, frontal e esquerda e os estados da comunicação e da bateria.
+O teste usa as mesmas condições e o mesmo acionamento do ataque descritos
+abaixo: pressionar o fim de curso pode acionar os relés imediatamente e
+repetir o disparo após cada cooldown enquanto ele continuar pressionado.
+Pressione **Voltar** para sair e interromper um pulso automático em andamento.
+O modo depende do firmware Body e não funciona no ambiente isolado `ihm-test`.
+Faça o teste em bancada, em área delimitada e com o mecanismo livre de pessoas.
 
-Em ataque ou defesa, o fim de curso unificado acionado permite selecionar o
+Em **Telemetria > Kicker Fim Curso**, o fim de curso aciona os dois relés
+sem depender dos ultrassônicos ou da comunicação com o Head. A bateria precisa
+ter leitura válida de pelo menos 40%. O pulso e o cooldown são os mesmos do
+ataque; enquanto o fim de curso estiver pressionado, o disparo se repete após
+o cooldown. A tela mostra o estado do fim de curso e da bateria. **Voltar**
+desativa o teste e interrompe o pulso automático. Esse modo também exige o
+firmware Body e deve ser usado em bancada com os motores parados.
+
+Confira os três GPIOs em `ConfigPinos::Body::Kicker` (`IN_ESQUERDA`,
+`IN_DIREITA` e `FIM_CURSO`), possíveis conflitos e as ligações em bancada.
+As saídas de relé são ativas em LOW e o fim de curso unificado é ativo em HIGH
+com `INPUT_PULLDOWN`. Garanta por hardware que os relés permaneçam desligados
+durante o boot ou reset, antes da configuração dos GPIOs.
+No Body, o nível HIGH é preparado antes de habilitar as saídas GPIO. Isso não
+controla os pinos antes de o firmware executar: verifique com o fabricante do
+módulo um circuito externo que mantenha cada entrada IN no nível inativo
+durante boot, reset e perda de alimentação do ESP32, sem aplicar tensão acima
+do limite permitido aos GPIOs.
+
+No ataque, o fim de curso unificado acionado permite selecionar o
 chute. Os ultrassônicos são U1/direita, U2/frente, U3/esquerda e U4/trás.
-Com frente acima de 80 cm, esquerda abaixo de 65 cm seleciona o kicker
-esquerdo, direita abaixo de 65 cm o direito; na faixa central ou quando ambas
-as laterais estiverem abaixo de 65 cm, não dispara. Com frente até 80 cm,
-a lateral com distância maior seleciona o kicker oposto; empate bloqueia.
+Quando somente o ultrassom esquerdo estiver até 30 cm, seleciona o kicker
+esquerdo. Quando somente o direito estiver até 30 cm, seleciona o direito.
+Se nenhum ou ambos estiverem dentro desse limite, os dois kickers acionam juntos.
+Leituras fora da faixa válida do sensor bloqueiam o disparo.
 As três leituras devem ser válidas e recentes, e a comunicação do Head deve
 estar ativa. Não há inferência de um sensor a partir do outro.
 
-Bateria sem leitura válida ou abaixo de 40% bloqueia o chute; perda de
-condições durante o pulso desliga as saídas. Cada pulso tem duração nominal
+Na estratégia de ataque, temporariamente o acionamento automático usa somente
+U1/direita: com leitura válida acima de 100 cm, dispara o kicker esquerdo, sem
+exigir o fim de curso. Os outros ultrassônicos não participam dessa decisão. As
+proteções de bateria, comunicação, validade/atualidade da leitura e cooldown
+continuam ativas.
+
+Bateria sem leitura válida ou abaixo de 40% bloqueia o chute automático; perda
+de ataque, comunicação, bateria válida ou ultrassônicos válidos durante o pulso
+desliga as saídas. O disparo manual pela IHM ignora esses requisitos, mas respeita
+o pulso em andamento e o cooldown. Cada pulso tem duração nominal
 de 400 ms, encerrado por temporizador independente do loop, seguido por
-600 ms de cooldown global. O temporizador é de software e não substitui uma
+600 ms de cooldown global, inclusive se o pulso automático for interrompido
+antes do fim. O temporizador é de software e não substitui uma
 proteção elétrica independente contra pulso prolongado. Enquanto um fim de
 curso continuar pressionado, um novo chute pode ocorrer após o cooldown se as
 condições ainda permitirem.
@@ -142,15 +187,15 @@ não desaparecer. Os tempos estão em `FugaLinha.cpp`.
 
 ## Curva J e intensidade do IR
 
-O desvio máximo do J varia de 6° a 30° conforme a proximidade estimada: quanto
-maior o índice, maior o desvio. Em 130° a direção de movimento é para trás;
-acima disso, o desvio cresce quadraticamente. Entre 90° e 130° a curva é
-interpolada para evitar um salto de direção em 90°. A captura frontal até 45°
-permanece igual.
+O desvio máximo do J é de 4,8°, 8,8° ou 16,6° conforme a proximidade
+estimada. Até 45° o movimento aponta diretamente para a bola; de 45° a 90°
+ele passa gradualmente para o contorno. Em 110° a direção é para trás e,
+acima disso, o desvio cresce quadraticamente. As transições em 45°, 90° e
+110° são contínuas.
 
 A estimativa combina com pesos iguais o maior percentual de atividade dos TSSP
 e o número de sensores com atividade acima de 2%. Cada indicador é limitado
-entre 0 e 1: a atividade usa os pontos 2% e 25%, e a contagem usa 1 e 6 sensores.
+entre 0 e 1: a atividade usa os pontos 2% e 25%, e a contagem usa 1 e 5 sensores.
 O resultado é suavizado a cada pacote IR válido (fator 0,2) e reiniciado quando
 a bola é perdida ou a telemetria expira. Os parâmetros estão em
 `include/ProximidadeIR.h`; os limites do J, em `include/MovimentoBola.h`.
@@ -162,8 +207,8 @@ representam distância em centímetros e dependem da bola, orientação, sensore
 e ambiente.** Registre leituras em várias distâncias e ângulos para calibrá-los.
 Teste primeiro com o robô suspenso e depois em área delimitada.
 
-O teste local dos cálculos pode ser executado com
-`g++ -std=c++11 -I include src/TESTS/TEST_PROXIMIDADE_IR/test.cpp -o /tmp/test-proximidade-ir && /tmp/test-proximidade-ir`.
+O teste local da curva pode ser executado com
+`g++ -std=c++11 -I include src/TESTS/TEST_MOVIMENTO_BOLA/test.cpp -o /tmp/test-movimento-bola && /tmp/test-movimento-bola`.
 
 ## Avanço prioritário da defesa
 
@@ -176,7 +221,10 @@ estado e para o movimento com segurança.
 O teste local dessa decisão pode ser executado com
 `g++ -std=c++11 -I include src/TESTS/TEST_MOVIMENTO_DEFESA/test.cpp -o /tmp/test-movimento-defesa && /tmp/test-movimento-defesa`.
 
-Teste do kicker (nativo, via PlatformIO): `pio run -e kicker-test && .pio/build/kicker-test/program`.
+Esse teste também valida os limites angulares, a estabilidade de 2 s, o
+proximidade `PERTO`, o avanço de 800 ms e o cooldown de 10 s. Use-o primeiro com o robô suspenso; a
+automação só deve ser usada em conformidade com o regulamento vigente da
+RoboCup Soccer Infrared.
 
 ## Correção de rumo e teste BNO-MOVE
 
@@ -189,6 +237,9 @@ ganhos Kp, Ki e Kd ajustados em **Testes > BNO-MOVE** são compartilhados
 pelos dois controladores e salvos no NVS. Os padrões são Kp 0,0044,
 Ki 0,0000022 e Kd 0,00012; valores já salvos prevalecem sobre os padrões.
 O fuzzy ajusta esses ganhos conforme o erro angular e a velocidade do gyro.
+O controlador das estratégias calcula a correção apenas ao receber um novo
+quadro BNO e mantém a última saída entre quadros; assim o tempo da integral
+acompanha as amostras, não a velocidade variável do loop.
 
 Esses valores são um ponto de partida, não uma sintonia garantida. Verifique a
 calibração do BNO/magnetômetro e teste primeiro com o robô suspenso, depois em

@@ -12,6 +12,9 @@ public:
   static const uint8_t PINOS_ECHO[QUANTIDADE];
 
   void begin();
+  void iniciarLeitura();
+  bool atualizar(float distanciasCm[QUANTIDADE],
+                 bool leiturasValidas[QUANTIDADE]);
   void ler(float distanciasCm[QUANTIDADE],
            bool leiturasValidas[QUANTIDADE]);
 };

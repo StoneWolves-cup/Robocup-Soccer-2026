@@ -2,6 +2,7 @@
 #include <U8g2lib.h>
 #include <BatteryEstimator.h>
 #include <Kicker.h>
+#include <KickerLogica.h>
 #include <MotoresTeste.h>
 #include <ConfigPinos.h>
 #include <IRProtocol.h>
@@ -62,10 +63,14 @@ enum Tela {
   TELA_BNO_RESET,
 
   TELA_KICKER,
+  TELA_TESTE_KICKER_AUTO,
+  TELA_TESTE_KICKER_FIM_CURSO,
   TELA_ULTRA,
   TELA_INFRA,
   TELA_LDR,
+  TELA_LDR_CENTRO,
   TELA_LDR_AJUSTE,
+  TELA_LDR_CENTRO_AJUSTE,
   TELA_MAC,
 
   TELA_TESTE_BNO,
@@ -109,15 +114,23 @@ uint8_t perfilLDRAtual = 0;
 int opcaoTelemetria = 0;
 int opcaoKicker = 0;
 const char *mensagemKicker = nullptr;
-const int totalTelemetria = 6;
+const int totalTelemetria = 8;
 int opcaoMac = 0;
 const uint8_t totalRegioesLDR = 4;
 const char *const NOMES_LDR[totalRegioesLDR] = {"ESQ", "DIR", "INF", "FRT"};
 uint16_t limiaresLDR[totalRegioesLDR] = {
     ConfigLDR::Ataque.esquerda, ConfigLDR::Ataque.direita,
     ConfigLDR::Ataque.inferior, ConfigLDR::Ataque.superior};
+constexpr uint8_t TOTAL_SENSORES_CENTRO_LDR = 7;
+uint16_t limiaresCentroLDR[TOTAL_SENSORES_CENTRO_LDR] = {
+    ConfigLDR::Ataque.centro[0], ConfigLDR::Ataque.centro[1],
+    ConfigLDR::Ataque.centro[2], ConfigLDR::Ataque.centro[3],
+    ConfigLDR::Ataque.centro[4], ConfigLDR::Ataque.centro[5],
+    ConfigLDR::Ataque.centro[6]};
 int opcaoLDR = 0;
 bool ajustandoLDR = false;
+int opcaoCentroLDR = 0;
+bool ajustandoCentroLDR = false;
 LDRFixed *ldrThresholdTarget = nullptr;
 Preferences preferenciasLDR;
 bool preferenciasLDRDisponiveis = false;
@@ -218,6 +231,19 @@ unsigned long ultimoMexer = 0;
 unsigned long ultimoVoltar = 0;
 
 const unsigned long DEBOUNCE = 150;
+constexpr unsigned long ATRASO_REPETICAO_LDR_MS = 400;
+constexpr unsigned long INTERVALO_REPETICAO_LDR_MS = 150;
+
+enum class RepeticaoAjusteLDR : uint8_t {
+  Nenhuma,
+  Aumentar,
+  Diminuir
+};
+
+RepeticaoAjusteLDR repeticaoAjusteLDR = RepeticaoAjusteLDR::Nenhuma;
+unsigned long inicioRepeticaoAjusteLDR = 0;
+unsigned long ultimaRepeticaoAjusteLDR = 0;
+bool alteracaoRepetidaLDRPendente = false;
 
 // =====================================================
 // DEBOUNCE REAL DOS BOTOES
@@ -287,6 +313,8 @@ bool telemetriaIRValida = false;
 bool telemetriaBolaDetectada = false;
 ProximidadeIR::Estimativa telemetriaProximidadeIR;
 bool telemetriaRegiaoBrancaLDR[LDRFixed::QuantidadeRegioes] = {};
+bool testeKickerNoBody = false;
+bool testeKickerComunicacaoValida = false;
 
 // Recebe um snapshot do Body para a IHM nao acoplar a renderizacao aos drivers
 // UART/sensores. Flags de validade distinguem "zero medido" de "sem pacote".
@@ -347,6 +375,19 @@ bool IHM_estrategiaAtaqueAtiva() {
 
 bool IHM_estrategiaDefesaAtiva() {
   return tela == TELA_DEFESA;
+}
+
+bool IHM_testeKickerAutomaticoAtivo() {
+  return tela == TELA_TESTE_KICKER_AUTO;
+}
+
+bool IHM_testeKickerFimDeCursoAtivo() {
+  return tela == TELA_TESTE_KICKER_FIM_CURSO;
+}
+
+void IHM_atualizarTesteKicker(bool comunicacaoValida) {
+  testeKickerNoBody = true;
+  testeKickerComunicacaoValida = comunicacaoValida;
 }
 
 bool IHM_obterBateria(float &percentual) {
@@ -648,10 +689,12 @@ void mostrarMenuTelemetria() {
     "ULTRASSONICOS",
     "INFRA",
     "LDR",
-    "MAC ADDRESS"
+    "MAC ADDRESS",
+    "KICKER AUTO",
+    "KICKER FIM CURSO"
   };
 
-  // Seis itens nao cabem na tela; a lista rola mantendo a opcao visivel.
+  // A lista rola mantendo a opcao visivel.
   const int primeiroItem = opcaoTelemetria > 4 ? opcaoTelemetria - 4 : 0;
   for (
     int i = primeiroItem;
@@ -842,6 +885,60 @@ void mostrarKicker() {
   oled.setFont(u8g2_font_5x8_tr);
   if (mensagemKicker) oled.drawStr(4, 54, mensagemKicker);
   oled.drawStr(4, 62, "MEXER=LADO SEL=CHUTAR");
+  oled.sendBuffer();
+}
+
+void mostrarTesteKickerAutomatico() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 8, "TESTE KICKER AUTO");
+  if (!testeKickerNoBody) {
+    oled.drawStr(4, 30, "DISPONIVEL NO BODY");
+  } else {
+    oled.drawStr(4, 17, digitalRead(ConfigPinos::Body::Kicker::FIM_CURSO) == HIGH
+                            ? "FIM: ACIONADO" : "FIM: LIVRE");
+    const uint8_t indices[] = {
+        ULTRA_INDEX_RIGHT, ULTRA_INDEX_FRONT, ULTRA_INDEX_LEFT};
+    const char *nomes[] = {"DIR:", "FRT:", "ESQ:"};
+    for (uint8_t i = 0; i < 3; ++i) {
+      const uint8_t y = 26 + i * 9;
+      oled.drawStr(4, y, nomes[i]);
+      if (telemetriaUltraValida &&
+          (telemetriaUltraMascara & (1U << indices[i])) &&
+          KickerLogica::distanciaValida(telemetriaUltra[indices[i]])) {
+        oled.setCursor(35, y);
+        oled.print(telemetriaUltra[indices[i]], 1);
+        oled.print(" cm");
+      } else {
+        oled.drawStr(35, y, "SEM DADOS");
+      }
+    }
+    float percentual = 0.0f;
+    const bool bateriaValida = IHM_obterBateria(percentual);
+    const bool bateriaOk = KickerLogica::bateriaPermite(bateriaValida, percentual);
+    oled.drawStr(4, 53, testeKickerComunicacaoValida ? "UART:OK" : "UART:OFF");
+    oled.drawStr(65, 53, bateriaOk ? "BAT:OK" : "BAT:OFF");
+  }
+  oled.drawStr(4, 63, "VOLTAR = SAIR");
+  oled.sendBuffer();
+}
+
+void mostrarTesteKickerFimDeCurso() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 8, "TESTE KICKER FIM CURSO");
+  if (!testeKickerNoBody) {
+    oled.drawStr(4, 30, "DISPONIVEL NO BODY");
+  } else {
+    oled.drawStr(4, 23, digitalRead(ConfigPinos::Body::Kicker::FIM_CURSO) == HIGH
+                            ? "FIM: ACIONADO" : "FIM: LIVRE");
+    float percentual = 0.0f;
+    const bool bateriaValida = IHM_obterBateria(percentual);
+    const bool bateriaOk = KickerLogica::bateriaPermite(bateriaValida, percentual);
+    oled.drawStr(4, 35, bateriaOk ? "BATERIA: OK" : "BATERIA: BLOQUEADA");
+    oled.drawStr(4, 48, "DISPARO: AMBOS");
+  }
+  oled.drawStr(4, 63, "VOLTAR = SAIR");
   oled.sendBuffer();
 }
 
@@ -1304,7 +1401,51 @@ void aplicarLimiaresLDRNoFirmware() {
   ldrThresholdTarget->setThresholds(
       limiaresLDR[0], limiaresLDR[1], limiaresLDR[2], limiaresLDR[3]);
   ldrThresholdTarget->setCenterSensorThresholds(
-      padrao.centro, padrao.histereseCentro);
+      limiaresCentroLDR, padrao.histereseCentro);
+}
+
+bool ajustarLimiarLDR(int variacao) {
+  if (opcaoLDR < 2 || opcaoLDR >= totalRegioesLDR + 2) {
+    return false;
+  }
+
+  const int regiao = opcaoLDR - 2;
+  const int novoValor = static_cast<int>(limiaresLDR[regiao]) + variacao;
+  const int valorLimitado = novoValor < 0
+                                ? 0
+                                : novoValor > LIMIAR_LDR_MAXIMO
+                                      ? LIMIAR_LDR_MAXIMO
+                                      : novoValor;
+  if (valorLimitado == limiaresLDR[regiao]) {
+    return false;
+  }
+
+  limiaresLDR[regiao] = static_cast<uint16_t>(valorLimitado);
+  aplicarLimiaresLDRNoFirmware();
+  return true;
+}
+
+bool ajustarLimiarCentroLDR(int variacao) {
+  if (opcaoCentroLDR < 0 ||
+      opcaoCentroLDR >= TOTAL_SENSORES_CENTRO_LDR) {
+    return false;
+  }
+
+  const int novoValor =
+      static_cast<int>(limiaresCentroLDR[opcaoCentroLDR]) + variacao;
+  const int valorLimitado = novoValor < 0
+                                ? 0
+                                : novoValor > LIMIAR_LDR_MAXIMO
+                                      ? LIMIAR_LDR_MAXIMO
+                                      : novoValor;
+  if (valorLimitado == limiaresCentroLDR[opcaoCentroLDR]) {
+    return false;
+  }
+
+  limiaresCentroLDR[opcaoCentroLDR] =
+      static_cast<uint16_t>(valorLimitado);
+  aplicarLimiaresLDRNoFirmware();
+  return true;
 }
 
 // Separa persistencia Attack/Defense para que a calibracao de uma nao sobrescreva a outra.
@@ -1327,6 +1468,13 @@ bool salvarLimiaresLDR() {
   if (preferenciasLDR.putBytes("thresholds", &config, sizeof(config)) !=
       sizeof(config)) {
     Serial.println("ERRO: falha ao salvar limiares LDR no NVS.");
+    erroLimiaresLDR = true;
+    return false;
+  }
+  if (preferenciasLDR.putBytes("center", limiaresCentroLDR,
+                               sizeof(limiaresCentroLDR)) !=
+      sizeof(limiaresCentroLDR)) {
+    Serial.println("ERRO: falha ao salvar limiares centrais LDR no NVS.");
     erroLimiaresLDR = true;
     return false;
   }
@@ -1375,6 +1523,32 @@ void carregarLimiaresLDR() {
                   limiaresLDR[0], limiaresLDR[1], limiaresLDR[2],
                   limiaresLDR[3]);
   }
+
+  const size_t tamanhoCentroSalvo =
+      preferenciasLDR.getBytesLength("center");
+  if (tamanhoCentroSalvo == sizeof(limiaresCentroLDR)) {
+    uint16_t centroSalvo[TOTAL_SENSORES_CENTRO_LDR];
+    bool centroValido =
+        preferenciasLDR.getBytes("center", centroSalvo, sizeof(centroSalvo)) ==
+        sizeof(centroSalvo);
+    for (uint8_t i = 0; i < TOTAL_SENSORES_CENTRO_LDR; ++i) {
+      centroValido = centroValido &&
+          centroSalvo[i] <= LIMIAR_LDR_MAXIMO;
+    }
+    if (centroValido) {
+      for (uint8_t i = 0; i < TOTAL_SENSORES_CENTRO_LDR; ++i) {
+        limiaresCentroLDR[i] = centroSalvo[i];
+      }
+    } else {
+      Serial.println(
+          "ERRO: limiares centrais LDR invalidos no NVS; usando padroes.");
+      erroLimiaresLDR = true;
+    }
+  } else if (tamanhoCentroSalvo != 0) {
+    Serial.println(
+        "ERRO: tamanho dos limiares centrais LDR invalido no NVS.");
+    erroLimiaresLDR = true;
+  }
 }
 
 // Recupera a ultima estrategia selecionada para aplicar seus limiares no boot.
@@ -1406,6 +1580,9 @@ void definirPadroesLDR() {
   limiaresLDR[1] = padrao.direita;
   limiaresLDR[2] = padrao.inferior;
   limiaresLDR[3] = padrao.superior;
+  for (uint8_t i = 0; i < TOTAL_SENSORES_CENTRO_LDR; ++i) {
+    limiaresCentroLDR[i] = padrao.centro[i];
+  }
 }
 
 // Troca de perfil atomica do ponto de vista da aplicacao: fecha NVS anterior,
@@ -1477,7 +1654,36 @@ void mostrarLDR() {
     oled.print(telemetriaRegiaoBrancaLDR[regioes[i]] ? "BRANCO" : "VERDE");
   }
 
-  oled.drawStr(4, 63, "VOLTAR = TELEMETRIA");
+  oled.drawStr(4, 63, "SEL=CENTRO  VOLTAR=SAIR");
+  oled.sendBuffer();
+}
+
+void mostrarLDRCentro() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 9, telemetriaRegiaoBrancaLDR[LDRFixed::Centro]
+                         ? "CENTRO: BRANCO"
+                         : "CENTRO: VERDE");
+  oled.drawHLine(8, 13, 112);
+  oled.setFont(u8g2_font_4x6_tr);
+
+  for (uint8_t i = 0; i < 7; ++i) {
+    const uint8_t y = 19 + i * 6;
+    oled.setCursor(4, y);
+    oled.print("C");
+    oled.print(i + 1);
+    oled.print(" M");
+    if (ldrThresholdTarget != nullptr) {
+      oled.print(ldrThresholdTarget->getCenterSensorReading(i));
+      oled.print(" L");
+      oled.print(ldrThresholdTarget->getCenterSensorThreshold(i));
+    } else {
+      oled.print("SEM DADOS");
+    }
+  }
+
+  oled.setFont(u8g2_font_5x8_tr);
+  oled.drawStr(4, 63, "VOLTAR=RESUMO");
   oled.sendBuffer();
 }
 
@@ -1550,9 +1756,11 @@ void mostrarLDRAjuste() {
   oled.drawHLine(8, 13, 112);
   oled.setFont(u8g2_font_5x8_tr);
 
+  constexpr int TOTAL_OPCOES_LDR = totalRegioesLDR + 3;
   const int primeiroItem = opcaoLDR > 3 ? opcaoLDR - 3 : 0;
   for (int linha = 0; linha < 4; ++linha) {
     const int item = primeiroItem + linha;
+    if (item >= TOTAL_OPCOES_LDR) break;
     const uint8_t y = 22 + linha * 9;
     if (item == opcaoLDR) {
       oled.drawStr(4, y, ">");
@@ -1562,15 +1770,52 @@ void mostrarLDRAjuste() {
     }
     if (item < 2) {
       oled.drawStr(16, y, item == 0 ? "LIMIAR 1" : "LIMIAR 2");
-    } else {
+    } else if (item < totalRegioesLDR + 2) {
       oled.drawStr(16, y, NOMES_LDR[item - 2]);
       oled.setCursor(65, y);
       oled.print(limiaresLDR[item - 2]);
+    } else {
+      oled.drawStr(16, y, "CENTRO");
     }
   }
 
   oled.drawStr(4, 62, (erroLimiaresLDR || erroPerfilLDR) ? "ERRO NO NVS" :
-               ajustandoLDR ? "SEL +5  MEXER -5" : "MEXER=PROX SEL=ESCOLHER");
+               ajustandoLDR ? "SEL +10 MEXER -10" : "MEXER=PROX SEL=ESCOLHER");
+  oled.sendBuffer();
+}
+
+void mostrarLDRAjusteCentro() {
+  oled.clearBuffer();
+  oled.setFont(u8g2_font_6x10_tr);
+  oled.drawStr(4, 9, "LIMIARES CENTRO");
+  oled.setCursor(95, 9);
+  oled.print(perfilLDRAtual == 0 ? "L1" : "L2");
+  oled.drawHLine(8, 13, 112);
+  oled.setFont(u8g2_font_5x8_tr);
+
+  const int primeiroItem = opcaoCentroLDR > 3 ? opcaoCentroLDR - 3 : 0;
+  for (int linha = 0; linha < 4; ++linha) {
+    const int sensor = primeiroItem + linha;
+    if (sensor >= TOTAL_SENSORES_CENTRO_LDR) break;
+    const uint8_t y = 23 + linha * 9;
+    if (sensor == opcaoCentroLDR) {
+      oled.drawStr(4, y, ">");
+      if (ajustandoCentroLDR) oled.drawStr(17, y, "*");
+    }
+    oled.setCursor(25, y);
+    oled.print("S");
+    oled.print(sensor + 1);
+    oled.print(" L");
+    oled.print(limiaresCentroLDR[sensor]);
+    if (ldrThresholdTarget != nullptr) {
+      oled.print(" M");
+      oled.print(ldrThresholdTarget->getCenterSensorReading(sensor));
+    }
+  }
+
+  oled.drawStr(4, 62, (erroLimiaresLDR || erroPerfilLDR) ? "ERRO NO NVS" :
+               ajustandoCentroLDR ? "SEL +10 MEXER -10" :
+                                    "MEXER=PROX SEL=AJUSTAR");
   oled.sendBuffer();
 }
 
@@ -1715,15 +1960,31 @@ void IHM_update() {
       mostrarTesteBNOMove();
     } else if (tela == TELA_LDR_AJUSTE) {
       if (ajustandoLDR) {
-        const int regiao = opcaoLDR - 2;
-        const int novoValor = static_cast<int>(limiaresLDR[regiao]) - 5;
-        limiaresLDR[regiao] = novoValor > 0 ? static_cast<uint16_t>(novoValor) : 0;
-        aplicarLimiaresLDRNoFirmware();
-        salvarLimiaresLDR();
+        if (ajustarLimiarLDR(-10)) {
+          salvarLimiaresLDR();
+        }
+        repeticaoAjusteLDR = RepeticaoAjusteLDR::Diminuir;
+        inicioRepeticaoAjusteLDR = agora;
+        ultimaRepeticaoAjusteLDR = agora;
+        alteracaoRepetidaLDRPendente = false;
       } else {
-        opcaoLDR = (opcaoLDR + 1) % (totalRegioesLDR + 2);
+        opcaoLDR = (opcaoLDR + 1) % (totalRegioesLDR + 3);
       }
       mostrarLDRAjuste();
+    } else if (tela == TELA_LDR_CENTRO_AJUSTE) {
+      if (ajustandoCentroLDR) {
+        if (ajustarLimiarCentroLDR(-10)) {
+          salvarLimiaresLDR();
+        }
+        repeticaoAjusteLDR = RepeticaoAjusteLDR::Diminuir;
+        inicioRepeticaoAjusteLDR = agora;
+        ultimaRepeticaoAjusteLDR = agora;
+        alteracaoRepetidaLDRPendente = false;
+      } else {
+        opcaoCentroLDR =
+            (opcaoCentroLDR + 1) % TOTAL_SENSORES_CENTRO_LDR;
+      }
+      mostrarLDRAjusteCentro();
     } else if (tela == TELA_INFO_TESTE) {
       mostrarInfoTesteChecklist();
     } else if (tela == TELA_MAC) {
@@ -1789,11 +2050,19 @@ void IHM_update() {
             tela = TELA_LDR;
             mostrarLDR();
             break;
-          default:
+          case 5:
             tela = TELA_MAC;
             opcaoMac = 0;
             ESPNowLink::iniciarBusca();
             mostrarMac();
+            break;
+          case 6:
+            tela = TELA_TESTE_KICKER_AUTO;
+            mostrarTesteKickerAutomatico();
+            break;
+          case 7:
+            tela = TELA_TESTE_KICKER_FIM_CURSO;
+            mostrarTesteKickerFimDeCurso();
             break;
         }
         break;
@@ -1837,21 +2106,51 @@ void IHM_update() {
       case TELA_BNO_LEITURA:
         zerarBNO();
         break;
+      case TELA_LDR:
+        tela = TELA_LDR_CENTRO;
+        mostrarLDRCentro();
+        break;
+      case TELA_LDR_CENTRO:
+        tela = TELA_LDR;
+        mostrarLDR();
+        break;
       case TELA_LDR_AJUSTE:
         if (ajustandoLDR) {
-          const int regiao = opcaoLDR - 2;
-          const int novoValor = static_cast<int>(limiaresLDR[regiao]) + 5;
-          if (novoValor <= LIMIAR_LDR_MAXIMO) {
-            limiaresLDR[regiao] = static_cast<uint16_t>(novoValor);
-            aplicarLimiaresLDRNoFirmware();
+          if (ajustarLimiarLDR(10)) {
             salvarLimiaresLDR();
           }
+          repeticaoAjusteLDR = RepeticaoAjusteLDR::Aumentar;
+          inicioRepeticaoAjusteLDR = agora;
+          ultimaRepeticaoAjusteLDR = agora;
+          alteracaoRepetidaLDRPendente = false;
         } else if (opcaoLDR < 2) {
           selecionarPerfilLDR(static_cast<uint8_t>(opcaoLDR));
-        } else {
+        } else if (opcaoLDR < totalRegioesLDR + 2) {
           ajustandoLDR = true;
+        } else {
+          tela = TELA_LDR_CENTRO_AJUSTE;
+          opcaoCentroLDR = 0;
+          ajustandoCentroLDR = false;
         }
-        mostrarLDRAjuste();
+        if (tela == TELA_LDR_CENTRO_AJUSTE) {
+          mostrarLDRAjusteCentro();
+        } else {
+          mostrarLDRAjuste();
+        }
+        break;
+      case TELA_LDR_CENTRO_AJUSTE:
+        if (ajustandoCentroLDR) {
+          if (ajustarLimiarCentroLDR(10)) {
+            salvarLimiaresLDR();
+          }
+          repeticaoAjusteLDR = RepeticaoAjusteLDR::Aumentar;
+          inicioRepeticaoAjusteLDR = agora;
+          ultimaRepeticaoAjusteLDR = agora;
+          alteracaoRepetidaLDRPendente = false;
+        } else {
+          ajustandoCentroLDR = true;
+        }
+        mostrarLDRAjusteCentro();
         break;
       case TELA_CHECKLIST:
         if (opcaoChecklist == 0) {
@@ -1865,6 +2164,7 @@ void IHM_update() {
           tela = TELA_LDR_AJUSTE;
           opcaoLDR = 0;
           ajustandoLDR = false;
+          ajustandoCentroLDR = false;
           mostrarLDRAjuste();
         } else {
           tela = TELA_INFO_TESTE;
@@ -1931,11 +2231,22 @@ void IHM_update() {
                tela == TELA_DEFESA) {
       tela = TELA_MENU;
       mostrarMenu();
+    } else if (tela == TELA_LDR_CENTRO) {
+      tela = TELA_LDR;
+      mostrarLDR();
     } else if (tela == TELA_ULTRA || tela == TELA_INFRA || tela == TELA_LDR ||
-               tela == TELA_KICKER || tela == TELA_MAC) {
+               tela == TELA_KICKER || tela == TELA_TESTE_KICKER_AUTO ||
+               tela == TELA_TESTE_KICKER_FIM_CURSO || tela == TELA_MAC) {
       ajustandoLDR = false;
       tela = TELA_TELEMETRIA;
       mostrarMenuTelemetria();
+    } else if (tela == TELA_LDR_CENTRO_AJUSTE && ajustandoCentroLDR) {
+      ajustandoCentroLDR = false;
+      mostrarLDRAjusteCentro();
+    } else if (tela == TELA_LDR_CENTRO_AJUSTE) {
+      ajustandoCentroLDR = false;
+      tela = TELA_LDR_AJUSTE;
+      mostrarLDRAjuste();
     } else if (tela == TELA_LDR_AJUSTE) {
       ajustandoLDR = false;
       tela = TELA_CHECKLIST;
@@ -1952,6 +2263,45 @@ void IHM_update() {
     }
   }
 
+  if (((tela == TELA_LDR_AJUSTE && ajustandoLDR) ||
+       (tela == TELA_LDR_CENTRO_AJUSTE && ajustandoCentroLDR)) &&
+      repeticaoAjusteLDR != RepeticaoAjusteLDR::Nenhuma) {
+    const bool botaoPressionado =
+        repeticaoAjusteLDR == RepeticaoAjusteLDR::Aumentar ? selecionar : mexer;
+    if (!botaoPressionado) {
+      if (alteracaoRepetidaLDRPendente) {
+        salvarLimiaresLDR();
+      }
+      repeticaoAjusteLDR = RepeticaoAjusteLDR::Nenhuma;
+      alteracaoRepetidaLDRPendente = false;
+    } else if (agora - inicioRepeticaoAjusteLDR >=
+                   ATRASO_REPETICAO_LDR_MS &&
+               agora - ultimaRepeticaoAjusteLDR >=
+                   INTERVALO_REPETICAO_LDR_MS) {
+      ultimaRepeticaoAjusteLDR = agora;
+      const int variacao =
+          repeticaoAjusteLDR == RepeticaoAjusteLDR::Aumentar ? 10 : -10;
+      const bool alterouLimiar =
+          tela == TELA_LDR_AJUSTE
+              ? ajustarLimiarLDR(variacao)
+              : ajustarLimiarCentroLDR(variacao);
+      if (alterouLimiar) {
+        alteracaoRepetidaLDRPendente = true;
+        if (tela == TELA_LDR_AJUSTE) {
+          mostrarLDRAjuste();
+        } else {
+          mostrarLDRAjusteCentro();
+        }
+      }
+    }
+  } else {
+    if (alteracaoRepetidaLDRPendente) {
+      salvarLimiaresLDR();
+    }
+    repeticaoAjusteLDR = RepeticaoAjusteLDR::Nenhuma;
+    alteracaoRepetidaLDRPendente = false;
+  }
+
   static unsigned long ultimaAtualizacao = 0;
   // Telemetria e bateria sao redesenhadas periodicamente sem bloquear a leitura
   // de botoes nem depender de uma interrupcao de tela.
@@ -1959,9 +2309,13 @@ void IHM_update() {
     ultimaAtualizacao = agora;
     if (tela == TELA_BNO_LEITURA) mostrarBNO();
     else if (tela == TELA_ULTRA) mostrarUltra();
+    else if (tela == TELA_TESTE_KICKER_AUTO) mostrarTesteKickerAutomatico();
+    else if (tela == TELA_TESTE_KICKER_FIM_CURSO) mostrarTesteKickerFimDeCurso();
     else if (tela == TELA_INFRA) mostrarInfra();
     else if (tela == TELA_LDR) mostrarLDR();
+    else if (tela == TELA_LDR_CENTRO) mostrarLDRCentro();
     else if (tela == TELA_LDR_AJUSTE) mostrarLDRAjuste();
+    else if (tela == TELA_LDR_CENTRO_AJUSTE) mostrarLDRAjusteCentro();
     else if (tela == TELA_BATERIA) mostrarBateria();
     else if (tela == TELA_TESTE_BNO) mostrarTesteBNOMove();
     else if (tela == TELA_TESTE_TSSP) mostrarTesteTSSP();

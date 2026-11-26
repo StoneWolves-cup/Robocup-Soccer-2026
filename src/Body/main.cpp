@@ -37,6 +37,9 @@ void IHM_obterGanhosPID(float &kp, float &ki, float &kd);
 bool IHM_estrategiaAtaqueAtiva();
 bool IHM_estrategiaDefesaAtiva();
 bool IHM_obterBateria(float &percentual);
+bool IHM_testeKickerAutomaticoAtivo();
+bool IHM_testeKickerFimDeCursoAtivo();
+void IHM_atualizarTesteKicker(bool comunicacaoValida);
 
 // O Body valida a telemetria recebida antes de mover. Sensores desligaveis por
 // configuracao continuam representados por flags, para que bloqueios explicitos
@@ -48,27 +51,30 @@ namespace {
   constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
   constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
   // IR e BNO sao requisitos da estrategia e bloqueiam o movimento quando ausentes.
-  constexpr bool USAR_LDR = true;
+  constexpr bool USAR_LDR = false;
+  constexpr bool USAR_ESPNOW = false;
   constexpr bool USAR_BNO = true;
   constexpr bool USAR_IR = true;
   constexpr bool USAR_ULTRASSONICOS = true;
+  constexpr bool HABILITAR_LED_RGB = true;
+  constexpr bool HABILITAR_AVANCO_BOLA_DEFESA = true;
   // GPIOs reservados para a UART, fora dos pinos atuais de motores e da IHM.
   constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
   constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
   constexpr uint32_t TIMEOUT_BNO_MS = 250;
-  constexpr float POTENCIA_MAXIMA_MOTORES = 0.90f;
+  constexpr float POTENCIA_MAXIMA_MOTORES = 1.00f;
   constexpr float FATOR_AJUSTE_KP_RUMO = 1.05f;
-  constexpr float VELOCIDADE_CORRECAO_LINHA = 0.70f;
+  constexpr float VELOCIDADE_CORRECAO_LINHA = 0.80f;
   constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.80f;
   constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 1.2360f;
   constexpr float PASSO_ROTACAO_BNO_MOVE = 0.005f;
-  constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 10000;
+  constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 3000;
   constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
   constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
   constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
   constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
   constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
-  constexpr float VELOCIDADE_RECUO_LDR_INFERIOR = 0.60f;
+  constexpr float VELOCIDADE_RECUO_LDR_INFERIOR = 0.80f;
   struct QuadroRecebido {
     IRActivityPacket pacote;
     uint32_t recebidoEmMs;
@@ -122,6 +128,7 @@ namespace {
   uint32_t ultimaMensagemBloqueioMs = 0;
   bool ultimaBolaDetectada = false;
   ProximidadeIR::Filtro filtroProximidadeIR;
+  MovimentoDefesa::AvancoBolaTemporizado avancoBolaDefesa;
   float ultimaDirecaoBola = 0.0f;
   float ultimaCorrecaoRumo = 0.0f;
   constexpr size_t TAMANHO_MAXIMO_PACOTE =
@@ -172,10 +179,12 @@ namespace {
     const bool comunicacaoConfirmada = !uartReconectando;
     if (comunicacaoConfirmada == ledUARTVerde) return;
 
-    rgbLedWrite(RGB_BUILTIN,
-                comunicacaoConfirmada ? 0 : RGB_BRIGHTNESS,
-                comunicacaoConfirmada ? RGB_BRIGHTNESS : 0,
-                0);
+    if (HABILITAR_LED_RGB) {
+      rgbLedWrite(RGB_BUILTIN,
+                  comunicacaoConfirmada ? 0 : RGB_BRIGHTNESS,
+                  comunicacaoConfirmada ? RGB_BRIGHTNESS : 0,
+                  0);
+    }
     ledUARTVerde = comunicacaoConfirmada;
   }
 
@@ -512,16 +521,20 @@ namespace {
 
   // Corrige rumo fixado na primeira leitura valida. O gyro amortece a rotacao e
   // a zona morta reduz acionamentos por pequenas variacoes do magnetometro.
-  float calcularCorrecaoRumo(bool controleAtivo, float heading, float gyroZ,
+  float calcularCorrecaoRumo(bool controleAtivo, bool quadroBnoNovo,
+                            float heading, float gyroZ,
                             float rumoAlvoGraus = rumoDesejadoGraus) {
     const uint32_t agoraUs = micros();
-    const uint32_t decorridoUs = agoraUs - ultimoCalculoPIDUs;
-    ultimoCalculoPIDUs = agoraUs;
 
     if (!controleAtivo) {
       pidRumo.reset();
+      ultimoCalculoPIDUs = agoraUs;
       return 0.0f;
     }
+
+    if (!quadroBnoNovo) return ultimaCorrecaoRumo;
+    const uint32_t decorridoUs = agoraUs - ultimoCalculoPIDUs;
+    ultimoCalculoPIDUs = agoraUs;
 
     float kp = PIDConfig::KP_PADRAO;
     float ki = PIDConfig::KI_PADRAO;
@@ -554,6 +567,7 @@ namespace {
     if (!USAR_ULTRASSONICOS) {
       informarBloqueioMovimento(
           "estrategia de defesa requer ultrassonicos habilitados.");
+      avancoBolaDefesa.interromper(millis());
       motores.parar();
       return;
     }
@@ -564,13 +578,14 @@ namespace {
       ultimoCalculoPIDUs = micros();
       informarBloqueioMovimento(
           "aguardando rumo de defesa e telemetria BNO validos.");
+      avancoBolaDefesa.interromper(millis());
       motores.parar();
       return;
     }
 
     if (USAR_BNO && bnoTelemetriaValida) {
       ultimaCorrecaoRumo = calcularCorrecaoRumo(
-          true, ultimoPacoteBNO.headingDegrees,
+          true, quadroBnoNovo, ultimoPacoteBNO.headingDegrees,
           ultimoPacoteBNO.gyroZDegreesPerSecond, rumoDefesaGraus);
     } else if (!USAR_BNO) {
       ultimaCorrecaoRumo = 0.0f;
@@ -585,6 +600,7 @@ namespace {
     if (!ultrassomTraseiroValido) {
       informarBloqueioMovimento(
           "aguardando ultrassom traseiro valido e recente.");
+      avancoBolaDefesa.interromper(millis());
       motores.parar();
       return;
     }
@@ -614,17 +630,33 @@ namespace {
         ldrFixed.regiaoBranca(LDRFixed::Inferior);
     const bool bolaValida =
         USAR_IR && irTelemetriaValida && ultimaBolaDetectada;
+    const bool bolaPerto = bolaValida &&
+        filtroProximidadeIR.estimativa().valida &&
+        ProximidadeIR::estaPerto(filtroProximidadeIR.estimativa().indice);
+    const float proximidadeBola = filtroProximidadeIR.estimativa().valida
+        ? filtroProximidadeIR.estimativa().indice
+        : 0.0f;
+    const bool avancoBolaAtivo = HABILITAR_AVANCO_BOLA_DEFESA &&
+        avancoBolaDefesa.atualizar(millis(), bolaValida, bolaPerto,
+                                   proximidadeBola, ultimaDirecaoBola);
     float x = bolaValida
-        ? MovimentoDefesa::comandoLateral(ultimaDirecaoBola)
+        ? MovimentoDefesa::comandoLateral(ultimaDirecaoBola, proximidadeBola)
         : MovimentoDefesa::comandoCentroU1(
               distanciaDireitaCm, ultrassomDireitoValido);
+    float y = -MovimentoDefesa::comandoDistancia(distanciaTraseiraCm);
+
+    if (avancoBolaAtivo) {
+      MovimentoDefesa::vetorAvancoBola(ultimaDirecaoBola, x, y);
+    }
+
     const float comandoLateralAntesLimite = x;
     x = MovimentoDefesa::limitarComandoLateral(
         x, distanciaDireitaCm, ultrassomDireitoValido,
         distanciaEsquerdaCm, ultrassomEsquerdoValido);
-    float y = -MovimentoDefesa::comandoDistancia(distanciaTraseiraCm);
     const char *fase = x != comandoLateralAntesLimite
         ? "limite lateral 43 cm"
+        : avancoBolaAtivo
+        ? "avancando para a bola"
         : bolaValida
         ? (x != 0.0f ? "acompanhando bola" : "bola alinhada")
         : (x != 0.0f ? "retornando ao centro" : "centro alinhado");
@@ -816,8 +848,11 @@ namespace {
 // Inicializa UART, controle, sensores e IHM; motores iniciam parados para que
 // a ausencia de telemetria ou uma inicializacao incompleta nao gere movimento.
 void setup() {
-  rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
   Serial.begin(USB_SERIAL_BAUD);
+  Kicker::begin();
+  if (HABILITAR_LED_RGB) {
+    rgbLedWrite(RGB_BUILTIN, RGB_BRIGHTNESS, 0, 0);
+  }
   const esp_reset_reason_t motivoReset = esp_reset_reason();
   Serial.printf("Motivo do reset: %d (%s)\n", static_cast<int>(motivoReset),
                 nomeMotivoReset(motivoReset));
@@ -829,14 +864,15 @@ void setup() {
   ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
-  Kicker::begin();
   if (USAR_LDR) {
     ldrFixed.begin();
     IHM_conectarLDR(&ldrFixed);
   }
   Serial.println("Iniciando IHM.");
   IHM_begin();
-  ESPNowLink::begin();
+  if (USAR_ESPNOW) {
+    ESPNowLink::begin();
+  }
   Serial.println("IHM inicializada; entrando no loop.");
 
   Serial.printf("Body UART1: %lu baud, 8N1, RX=18 TX=17.\n",
@@ -855,6 +891,7 @@ void setup() {
                 USAR_BNO ? "ligado" : "desligado",
                 USAR_LDR ? "ligado" : "desligado",
                 USAR_ULTRASSONICOS ? "ligados" : "desligados");
+  Serial.printf("ESP-NOW: %s\n", USAR_ESPNOW ? "ligado" : "desligado");
   Serial.println(USAR_LDR
       ? "LDR habilitado: classificacao por limiares fixos e histerese."
       : "LDR desativado.");
@@ -868,12 +905,15 @@ void loop() {
   atualizarLedUART();
   imprimirDiagnosticoUART();
   IHM_update();
-  ESPNowLink::update();
+  if (USAR_ESPNOW) {
+    ESPNowLink::update();
+  }
   const bool estrategiaAtaqueLocal = IHM_estrategiaAtaqueAtiva();
   // Ataque cede lugar a defesa enquanto o parceiro informa RoboDefOn = false;
   // timeout do vinculo nao conta como false, portanto o ataque segue normal.
   const bool defesaSubstituiAtaque =
-      estrategiaAtaqueLocal && ESPNowLink::defesaParceiroDesligada();
+      USAR_ESPNOW && estrategiaAtaqueLocal &&
+      ESPNowLink::defesaParceiroDesligada();
   const bool estrategiaAtaqueAtiva =
       estrategiaAtaqueLocal && !defesaSubstituiAtaque;
   const bool estrategiaDefesaAtiva =
@@ -884,6 +924,9 @@ void loop() {
     ultimaCorrecaoRumo = 0.0f;
     pidRumo.reset();
     ultimoCalculoPIDUs = micros();
+  }
+  if (!estrategiaDefesaExecutando) {
+    avancoBolaDefesa.resetar();
   }
 
   if (USAR_LDR) {
@@ -961,13 +1004,20 @@ void loop() {
       filtroProximidadeIR.estimativa());
   atualizarEstadoUART(irTelemetriaValida, bnoTelemetriaValida);
   atualizarLedUART();
+  IHM_atualizarTesteKicker(!uartReconectando);
 
   float bateriaPercentual = 0.0f;
   const bool bateriaValida = IHM_obterBateria(bateriaPercentual);
-  Kicker::atualizar(estrategiaAtaqueAtiva || estrategiaDefesaAtiva,
-                    !uartReconectando, bateriaValida, bateriaPercentual,
-                    ultraTelemetriaValida, ultimoPacoteUltra.distanceCm,
-                    ultimoPacoteUltra.validMask);
+  const Kicker::ModoAutomatico modoKicker = IHM_testeKickerFimDeCursoAtivo()
+      ? Kicker::ModoAutomatico::FimDeCurso
+      : IHM_testeKickerAutomaticoAtivo()
+          ? Kicker::ModoAutomatico::ComUltrassom
+          : estrategiaAtaqueAtiva
+              ? Kicker::ModoAutomatico::AtaqueUltrassomDireito
+              : Kicker::ModoAutomatico::Desativado;
+  Kicker::atualizar(modoKicker, !uartReconectando,
+                    bateriaValida, bateriaPercentual, ultraTelemetriaValida,
+                    ultimoPacoteUltra.distanceCm, ultimoPacoteUltra.validMask);
 
   if (uartReconectando) {
     informarBloqueioMovimento(
@@ -1017,6 +1067,7 @@ void loop() {
     if (USAR_BNO && bnoTelemetriaValida) {
       ultimaCorrecaoRumo = calcularCorrecaoRumo(
           !paradaFrontal && (ultimaBolaDetectada || fugaEmAndamento),
+          quadroBnoNovo,
           ultimoPacoteBNO.headingDegrees,
           ultimoPacoteBNO.gyroZDegreesPerSecond);
     } else if (!USAR_BNO) {

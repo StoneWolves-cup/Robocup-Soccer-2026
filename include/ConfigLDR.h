@@ -19,8 +19,8 @@ namespace ConfigLDR {
     // Cada perfil e aplicado ao selecionar a estrategia; ajuste em campo.
     // O limiar superior inicial e a media dos antigos limiares de C0 e C14.
     constexpr Limiares Ataque = {
-        3332, 1324, 2312, 3133,
-        {2890, 3699, 1936, 2045, 1776, 2924, 1874},
+        102, 2100, 142, 142,
+        {210, 140, 210, 128, 230, 60, 208},
         20
     };
 

@@ -55,6 +55,8 @@ No Regional da modalidade de 2026 tivemos a hora de nos classificaar para o naci
 
 ### Microcontroladores
 
+Nós ua
+
 ### Sensores
 
 ### Atuadores
@@ -113,7 +115,7 @@ O mesmo firmware do Body contém as duas estratégias; a escolha é feita na IHM
 
 ### Atacante
 
-O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoBola.h](include/MovimentoBola.h)): quando a bola está à frente (até 45°), o robô avança em direção a ela; quando ela está ao lado ou atrás, ele contorna a bola em vez de ir direto, para não empurrá-la para trás e chegar alinhado ao gol. O desvio do contorno cresce com a proximidade da bola (7°, 10° e 25°). Com a bola à frente e o caminho livre, o kicker é acionado.
+O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoBola.h](include/MovimentoBola.h)): quando a bola está à frente (até 45°), o robô avança em direção a ela; quando ela está ao lado ou atrás, ele contorna a bola em vez de ir direto, para não empurrá-la para trás e chegar alinhado ao gol. O desvio do contorno cresce com a proximidade da bola (4,8°, 8,8° e 16,6°). O fim de curso aciona o kicker quando a comunicação, a bateria e as leituras ultrassônicas atendem às condições descritas em [TEST.md](src/TESTS/TEST.md#kicker-duplo).
 
 ### Goleiro
 

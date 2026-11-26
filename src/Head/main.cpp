@@ -53,6 +53,7 @@ bool bnoDisponivel = false;
 uint32_t ultimaAtualizacaoBNO = 0;
 uint32_t ultimaTentativaBNO = 0;
 uint32_t ultimaLeituraUltra = 0;
+bool leituraUltraEmAndamento = false;
 
 // Soma as atividades acima do ruido como vetores na circunferencia. O filtro
 // exponencial estabiliza a direcao; a razao modulo/soma estima a concentracao
@@ -148,11 +149,8 @@ void transmitirBNO() {
   Serial1.write(reinterpret_cast<const uint8_t *>(&pacote), sizeof(pacote));
 }
 
-void transmitirUltra() {
-  float distanciasCm[Ultrassonicos::QUANTIDADE] = {};
-  bool leiturasValidas[Ultrassonicos::QUANTIDADE] = {};
-  sensorUltrassonicos.ler(distanciasCm, leiturasValidas);
-
+void transmitirUltra(const float distanciasCm[Ultrassonicos::QUANTIDADE],
+                     const bool leiturasValidas[Ultrassonicos::QUANTIDADE]) {
   UltraDataPacket pacote{};
   pacote.magic = ULTRA_PACKET_MAGIC;
   pacote.version = ULTRA_PACKET_VERSION;
@@ -235,7 +233,16 @@ void loop() {
   }
   if ((uint32_t)(agoraMs - ultimaLeituraUltra) >= INTERVALO_ULTRA_MS) {
     ultimaLeituraUltra = agoraMs;
-    transmitirUltra();
+    sensorUltrassonicos.iniciarLeitura();
+    leituraUltraEmAndamento = true;
+  }
+  if (leituraUltraEmAndamento) {
+    float distanciasCm[Ultrassonicos::QUANTIDADE] = {};
+    bool leiturasValidas[Ultrassonicos::QUANTIDADE] = {};
+    if (sensorUltrassonicos.atualizar(distanciasCm, leiturasValidas)) {
+      transmitirUltra(distanciasCm, leiturasValidas);
+      leituraUltraEmAndamento = false;
+    }
   }
   if ((uint32_t)(agoraMs - ultimoEnvio) >= INTERVALO_ENVIO_MS) {
     ultimoEnvio = agoraMs;

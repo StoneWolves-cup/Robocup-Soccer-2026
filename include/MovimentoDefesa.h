@@ -3,27 +3,150 @@
 
 #include <Angulo.h>
 #include <math.h>
+#include <stdint.h>
 
 namespace MovimentoDefesa {
 constexpr float DISTANCIA_ALVO_CM = 40.0f;
-constexpr float ZONA_MORTA_DISTANCIA_CM = 4.0f;
-constexpr float GANHO_DISTANCIA = 0.10f;
-constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.70f;
-constexpr float VELOCIDADE_LATERAL_MINIMA = 0.50f;
-constexpr float VELOCIDADE_LATERAL_MAXIMA = 0.90f;
-constexpr float ANGULO_ZONA_MORTA_GRAUS = 2.6f;
+constexpr float ZONA_MORTA_DISTANCIA_CM = 3.0f;
+constexpr float GANHO_DISTANCIA = 0.20f;
+constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.60f;
+constexpr float VELOCIDADE_LATERAL_MINIMA = 0.80f;
+constexpr float VELOCIDADE_LATERAL_MAXIMA = 1.0f;
+constexpr float ANGULO_ZONA_MORTA_GRAUS = 8.0f;
 constexpr float ANGULO_RESPOSTA_FORTE_GRAUS = 3.0f;
+constexpr float ANGULO_RESPOSTA_FORTE_PERTO_GRAUS = 12.0f;
 constexpr float ANGULO_MAXIMO_LATERAL_GRAUS = 100.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MIN_CM = 48.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MAX_CM = 113.0f;
 constexpr float DISTANCIA_CENTRO_U1_MIN_CM = 65.0f;
 constexpr float DISTANCIA_CENTRO_U1_MAX_CM = 75.0f;
 constexpr float VELOCIDADE_CENTRO_MINIMA = 0.70f;
-constexpr float GANHO_CENTRO_U1 = 0.04f;
+constexpr float GANHO_CENTRO_U1 = 0.1f;
 constexpr float VELOCIDADE_CENTRO_MAXIMA = 0.80f;
 constexpr float DISTANCIA_LIMITE_LATERAL_CM = 30.0f;
-constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.75f;
+constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.70f;
 constexpr float DISTANCIA_ATIVACAO_AVANCO_LDR_CM = 25.0f; 
+constexpr float ANGULO_ZONA_MORTA_LONGE_GRAUS = 1.0f;
+constexpr float ANGULO_ZONA_MORTA_PERTO_GRAUS = 10.0f;
+constexpr float FATOR_EXPONENCIAL_LIMIAR = 3.0f;
+constexpr float NORMALIZADOR_EXPONENCIAL_LIMIAR = 19.0855369f;
+constexpr uint32_t TEMPO_ESTABILIDADE_AVANCO_MS = 2000;
+constexpr uint32_t DURACAO_AVANCO_BOLA_MS = 900;
+constexpr uint32_t COOLDOWN_AVANCO_BOLA_MS = 5000;
+constexpr float VELOCIDADE_AVANCO_BOLA = 1.00f;
+
+inline float progressoExponencialLimiar(float proximidade) {
+  if (!isfinite(proximidade)) proximidade = 0.0f;
+  proximidade = fmaxf(0.0f, fminf(1.0f, proximidade));
+  return (expf(FATOR_EXPONENCIAL_LIMIAR * proximidade) - 1.0f) /
+      NORMALIZADOR_EXPONENCIAL_LIMIAR;
+}
+
+inline float limiarAngular(float proximidade) {
+  const float progresso = progressoExponencialLimiar(proximidade);
+  return ANGULO_ZONA_MORTA_LONGE_GRAUS +
+      (ANGULO_ZONA_MORTA_PERTO_GRAUS -
+       ANGULO_ZONA_MORTA_LONGE_GRAUS) * progresso;
+}
+
+inline float limiarRespostaForte(float proximidade) {
+  const float progresso = progressoExponencialLimiar(proximidade);
+  return ANGULO_RESPOSTA_FORTE_GRAUS +
+      (ANGULO_RESPOSTA_FORTE_PERTO_GRAUS -
+       ANGULO_RESPOSTA_FORTE_GRAUS) * progresso;
+}
+
+class AvancoBolaTemporizado {
+ public:
+  enum class Estado : uint8_t {
+    Inativo,
+    Estabilizando,
+    Avancando,
+    Cooldown,
+  };
+
+  void resetar() {
+    _estado = Estado::Inativo;
+    _inicioEstadoMs = 0;
+  }
+
+  void interromper(uint32_t agoraMs) {
+    if (_estado == Estado::Avancando) {
+      _estado = Estado::Cooldown;
+      _inicioEstadoMs = agoraMs;
+    } else if (_estado == Estado::Estabilizando) {
+      _estado = Estado::Inativo;
+      _inicioEstadoMs = agoraMs;
+    }
+  }
+
+  bool atualizar(uint32_t agoraMs, bool bolaValida, bool bolaPerto,
+                 float proximidade, float anguloBolaGraus) {
+    if (_estado == Estado::Avancando) {
+      if (!bolaValida || !bolaPerto || !isfinite(anguloBolaGraus)) {
+        _estado = Estado::Cooldown;
+        _inicioEstadoMs = agoraMs;
+        return false;
+      }
+      if ((uint32_t)(agoraMs - _inicioEstadoMs) <
+          DURACAO_AVANCO_BOLA_MS) {
+        return true;
+      }
+      _estado = Estado::Cooldown;
+      _inicioEstadoMs = agoraMs;
+      return false;
+    }
+
+    if (_estado == Estado::Cooldown) {
+      if ((uint32_t)(agoraMs - _inicioEstadoMs) <
+          COOLDOWN_AVANCO_BOLA_MS) {
+        return false;
+      }
+      _estado = Estado::Inativo;
+    }
+
+    const bool anguloEstavel = bolaValida && bolaPerto &&
+        isfinite(anguloBolaGraus) &&
+        fabsf(erroAngular(anguloBolaGraus, 0.0f)) <=
+            limiarAngular(proximidade);
+    if (!anguloEstavel) {
+      _estado = Estado::Inativo;
+      _inicioEstadoMs = agoraMs;
+      return false;
+    }
+
+    if (_estado == Estado::Inativo) {
+      _estado = Estado::Estabilizando;
+      _inicioEstadoMs = agoraMs;
+      return false;
+    }
+
+    if ((uint32_t)(agoraMs - _inicioEstadoMs) <
+        TEMPO_ESTABILIDADE_AVANCO_MS) {
+      return false;
+    }
+
+    _estado = Estado::Avancando;
+    _inicioEstadoMs = agoraMs;
+    return true;
+  }
+
+  Estado estado() const { return _estado; }
+
+ private:
+  Estado _estado = Estado::Inativo;
+  uint32_t _inicioEstadoMs = 0;
+};
+
+inline void vetorAvancoBola(float anguloBolaGraus, float &comandoX,
+                            float &comandoY) {
+  constexpr float RADIANOS_POR_GRAU = 0.01745329251994329577f;
+  const float anguloRad =
+      erroAngular(anguloBolaGraus, 0.0f) * RADIANOS_POR_GRAU;
+  comandoX = sinf(anguloRad) * VELOCIDADE_AVANCO_BOLA;
+  // Omni usa y positivo para frente; o avanco deve seguir a bola frontal.
+  comandoY = cosf(anguloRad) * VELOCIDADE_AVANCO_BOLA;
+}
 
 inline bool priorizarAvancoLDR(
     float distanciaTraseiraCm, bool leituraValida, bool superiorBranco,
@@ -43,26 +166,30 @@ inline float comandoDistancia(float distanciaCm) {
       magnitudeErro - ZONA_MORTA_DISTANCIA_CM, erroCm);
   const float comando = erroForaDaZonaMorta * GANHO_DISTANCIA;
   return fmaxf(-VELOCIDADE_MAXIMA_DISTANCIA,
-               fminf(VELOCIDADE_MAXIMA_DISTANCIA, comando));
-}
+                fminf(VELOCIDADE_MAXIMA_DISTANCIA, comando));
+  }
 
-inline float comandoLateral(float anguloBolaGraus) {
+inline float comandoLateral(float anguloBolaGraus, float proximidade = 0.0f) {
   const float anguloAssinado = erroAngular(anguloBolaGraus, 0.0f);
   const float magnitudeAngulo = fabsf(anguloAssinado);
-  if (magnitudeAngulo <= ANGULO_ZONA_MORTA_GRAUS) return 0.0f;
+  const float zonaMorta = limiarAngular(proximidade);
+  if (magnitudeAngulo <= zonaMorta) return 0.0f;
 
   float velocidade;
-  if (magnitudeAngulo < ANGULO_RESPOSTA_FORTE_GRAUS) {
+  const float inicioResposta = zonaMorta + 2.0f;
+  if (magnitudeAngulo < inicioResposta) {
     const float progresso =
-        (magnitudeAngulo - ANGULO_ZONA_MORTA_GRAUS) /
-        (ANGULO_RESPOSTA_FORTE_GRAUS - ANGULO_ZONA_MORTA_GRAUS);
+        (magnitudeAngulo - zonaMorta) /
+        (inicioResposta - zonaMorta);
     velocidade = VELOCIDADE_LATERAL_MINIMA * progresso;
   } else {
+    const float anguloRespostaForte = limiarRespostaForte(proximidade);
     const float progresso = fminf(
-        1.0f,
-        (magnitudeAngulo - ANGULO_RESPOSTA_FORTE_GRAUS) /
-            (ANGULO_MAXIMO_LATERAL_GRAUS -
-             ANGULO_RESPOSTA_FORTE_GRAUS));
+        1.0f, fmaxf(
+                  0.0f,
+                  (magnitudeAngulo - anguloRespostaForte) /
+                      (ANGULO_MAXIMO_LATERAL_GRAUS -
+                       anguloRespostaForte)));
     velocidade = VELOCIDADE_LATERAL_MINIMA +
         (VELOCIDADE_LATERAL_MAXIMA - VELOCIDADE_LATERAL_MINIMA) * progresso;
   }
