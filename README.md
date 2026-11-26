@@ -37,6 +37,23 @@ No Regional da modalidade de 2026 tivemos a hora de nos classificaar para o naci
   </tr>
   <tr>
     <td>Felipe</td>
+    <td>Programador</td>
+    <td>felipeira066@gmail.com</td>
+  </tr>
+  <tr>
+    <td>Raul</td>
+    <td>Mecânico</td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>Luiz</td>
+    <td>Eletrônica</td>
+    <td></td>
+  </tr>
+  <tr>
+    <td>Samuel</td>
+    <td>Hardware designer</td>
+    <td></td>
   </tr>
 </table>
 
