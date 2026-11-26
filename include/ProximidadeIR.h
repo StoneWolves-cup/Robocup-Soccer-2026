@@ -7,10 +7,10 @@
 namespace ProximidadeIR {
 // Valores iniciais para calibrar com a bola real e as condicoes do campo.
 constexpr uint8_t LIMIAR_SENSOR_ATIVO = 2;
-constexpr float ATIVIDADE_LONGE = 2.0f;
+constexpr float ATIVIDADE_LONGE = 6.7f;
 constexpr float ATIVIDADE_PERTO = 25.0f;
 constexpr float SENSORES_LONGE = 1.0f;
-constexpr float SENSORES_PERTO = 5.0f;
+constexpr float SENSORES_PERTO = 4.0f;
 constexpr float FILTRO_ALPHA = 0.2f;
 constexpr float INDICE_MINIMO_PERTO = 2.0f / 3.0f;
 

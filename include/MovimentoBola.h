@@ -5,12 +5,12 @@
 #include <math.h>
 
 namespace MovimentoBola {
-constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 45.0f;
+constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 55.0f;
 constexpr float ANGULO_LATERAL_GRAUS = 90.0f;
 constexpr float ANGULO_INICIO_J_TRASEIRO_GRAUS = 110.0f;
 constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
 constexpr float DESVIO_J_LONGE_GRAUS = 4.8f;
-constexpr float DESVIO_J_MEDIA_GRAUS = 9.0f;
+constexpr float DESVIO_J_MEDIA_GRAUS = 12.0f;
 constexpr float DESVIO_J_PERTO_GRAUS = 16.6f;
 
 inline float calcularAnguloJ(float anguloBolaGraus, float proximidade) {

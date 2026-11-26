@@ -10,18 +10,14 @@ constexpr float DISTANCIA_ALVO_CM = 40.0f;
 constexpr float ZONA_MORTA_DISTANCIA_CM = 3.0f;
 constexpr float GANHO_DISTANCIA = 0.20f;
 constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.60f;
-constexpr float VELOCIDADE_LATERAL_MINIMA = 0.80f;
 constexpr float VELOCIDADE_LATERAL_MAXIMA = 1.0f;
-constexpr float ANGULO_ZONA_MORTA_GRAUS = 8.0f;
-constexpr float ANGULO_RESPOSTA_FORTE_GRAUS = 3.0f;
-constexpr float ANGULO_RESPOSTA_FORTE_PERTO_GRAUS = 12.0f;
-constexpr float ANGULO_MAXIMO_LATERAL_GRAUS = 100.0f;
+constexpr float ANGULO_ZONA_MORTA_GRAUS = 1.8f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MIN_CM = 48.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MAX_CM = 113.0f;
 constexpr float DISTANCIA_CENTRO_U1_MIN_CM = 65.0f;
 constexpr float DISTANCIA_CENTRO_U1_MAX_CM = 75.0f;
 constexpr float VELOCIDADE_CENTRO_MINIMA = 0.70f;
-constexpr float GANHO_CENTRO_U1 = 0.1f;
+constexpr float GANHO_CENTRO_U1 = 0.18f;
 constexpr float VELOCIDADE_CENTRO_MAXIMA = 0.80f;
 constexpr float DISTANCIA_LIMITE_LATERAL_CM = 30.0f;
 constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.70f;
@@ -30,9 +26,9 @@ constexpr float ANGULO_ZONA_MORTA_LONGE_GRAUS = 1.0f;
 constexpr float ANGULO_ZONA_MORTA_PERTO_GRAUS = 10.0f;
 constexpr float FATOR_EXPONENCIAL_LIMIAR = 3.0f;
 constexpr float NORMALIZADOR_EXPONENCIAL_LIMIAR = 19.0855369f;
-constexpr uint32_t TEMPO_ESTABILIDADE_AVANCO_MS = 2000;
+constexpr uint32_t TEMPO_ESTABILIDADE_AVANCO_MS = 3000;
 constexpr uint32_t DURACAO_AVANCO_BOLA_MS = 900;
-constexpr uint32_t COOLDOWN_AVANCO_BOLA_MS = 5000;
+constexpr uint32_t COOLDOWN_AVANCO_BOLA_MS = 500;
 constexpr float VELOCIDADE_AVANCO_BOLA = 1.00f;
 
 inline float progressoExponencialLimiar(float proximidade) {
@@ -47,13 +43,6 @@ inline float limiarAngular(float proximidade) {
   return ANGULO_ZONA_MORTA_LONGE_GRAUS +
       (ANGULO_ZONA_MORTA_PERTO_GRAUS -
        ANGULO_ZONA_MORTA_LONGE_GRAUS) * progresso;
-}
-
-inline float limiarRespostaForte(float proximidade) {
-  const float progresso = progressoExponencialLimiar(proximidade);
-  return ANGULO_RESPOSTA_FORTE_GRAUS +
-      (ANGULO_RESPOSTA_FORTE_PERTO_GRAUS -
-       ANGULO_RESPOSTA_FORTE_GRAUS) * progresso;
 }
 
 class AvancoBolaTemporizado {
@@ -168,34 +157,6 @@ inline float comandoDistancia(float distanciaCm) {
   return fmaxf(-VELOCIDADE_MAXIMA_DISTANCIA,
                 fminf(VELOCIDADE_MAXIMA_DISTANCIA, comando));
   }
-
-inline float comandoLateral(float anguloBolaGraus, float proximidade = 0.0f) {
-  const float anguloAssinado = erroAngular(anguloBolaGraus, 0.0f);
-  const float magnitudeAngulo = fabsf(anguloAssinado);
-  const float zonaMorta = limiarAngular(proximidade);
-  if (magnitudeAngulo <= zonaMorta) return 0.0f;
-
-  float velocidade;
-  const float inicioResposta = zonaMorta + 2.0f;
-  if (magnitudeAngulo < inicioResposta) {
-    const float progresso =
-        (magnitudeAngulo - zonaMorta) /
-        (inicioResposta - zonaMorta);
-    velocidade = VELOCIDADE_LATERAL_MINIMA * progresso;
-  } else {
-    const float anguloRespostaForte = limiarRespostaForte(proximidade);
-    const float progresso = fminf(
-        1.0f, fmaxf(
-                  0.0f,
-                  (magnitudeAngulo - anguloRespostaForte) /
-                      (ANGULO_MAXIMO_LATERAL_GRAUS -
-                       anguloRespostaForte)));
-    velocidade = VELOCIDADE_LATERAL_MINIMA +
-        (VELOCIDADE_LATERAL_MAXIMA - VELOCIDADE_LATERAL_MINIMA) * progresso;
-  }
-
-  return copysignf(velocidade, anguloAssinado);
-}
 
 inline bool faixaCentralU1(float distanciaCm, bool leituraValida) {
   return leituraValida && isfinite(distanciaCm) &&

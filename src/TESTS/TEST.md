@@ -66,34 +66,23 @@ após reiniciar; consulte o monitor serial.
 ## Comportamento da defesa
 
 Com a estratégia de defesa ativa, o ultrassônico traseiro (ECHO4) e o BNO
-precisam fornecer leituras válidas e recentes, e o LDR deve estar habilitado.
-O robô controla a distância traseira em 42,5 cm, com zona morta de ±2 cm. No
-posicionamento inicial, também exige que o LDR inferior detecte branco. Os
-comandos longitudinais da defesa são invertidos em relação ao eixo `y` geral
-para corresponder ao sentido observado no robô. Se a distância já estiver na
-zona morta e o inferior ainda estiver verde, busca o branco lentamente para
-trás; depois corrige a distância e só inicia o acompanhamento quando ambas as
-condições forem satisfeitas.
+precisam fornecer leituras válidas e recentes. O robô controla a distância
+traseira em 40 cm, com zona morta de ±3 cm.
 
-Após o posicionamento inicial, a distância continua sendo corrigida pelo
-ultrassônico. Com bola válida no IR, o robô acompanha sua direção apenas pelo
-eixo horizontal (`x > 0` esquerda, `x < 0` direita), proporcionalmente ao seno
-do ângulo e com zona morta de 10°. A rotação continua vindo exclusivamente da
-correção de rumo do BNO, nunca do ângulo da bola. Sem bola válida, mantém a
-distância e o rumo, sem deslocamento lateral. Uma leitura traseira inválida ou
-expirada bloqueia os motores.
+Com bola válida no IR, um PID acompanha sua direção pelo eixo horizontal
+(`x > 0` esquerda, `x < 0` direita), com zona morta de ±2°. O PID usa novos
+quadros IR e é reiniciado ao perder a bola, alcançar a zona morta, interromper
+a defesa ou quando o avanço e os limites laterais substituem seu comando.
+A rotação continua vindo exclusivamente do BNO. Sem bola, a defesa usa U1 para
+retornar ao centro; uma leitura traseira inválida ou expirada bloqueia os motores.
 
-Quando a bola permanece detectada, classificada como `PERTO` e dentro de ±10°
-do eixo frontal por 2 s, a defesa faz um avanço apontado para a bola durante
-800 ms. Depois dos 800 ms, retorna ao controle padrão da defesa e inicia um
-cooldown de 10 s. O avanço exige IR válido, mantém a correção de rumo do BNO e
-continua sujeito aos limites laterais; a perda da bola ou da proximidade
-durante a espera reinicia a estabilidade angular.
-
-O acompanhamento angular usa uma zona morta adaptativa: aproximadamente 0,1°
-quando a bola está longe, aumentando de forma exponencial até 12° quando o
-índice de proximidade chega ao máximo. O mesmo limiar adaptativo é usado para a
-estabilidade angular que precede o avanço.
+Quando a bola permanece detectada, classificada como `PERTO` e dentro do
+limiar angular adaptativo por 3 s, a defesa faz um avanço apontado para a bola
+durante 800 ms, seguido de cooldown de 5 s. O limiar do avanço varia de 1° a
+10° conforme a proximidade e é independente da zona morta do PID lateral.
+O avanço mantém a correção de rumo do BNO e está sujeito aos limites laterais.
+Os ganhos do PID lateral são valores iniciais e devem ser ajustados com o robô
+suspenso e depois em campo; confirme também o sentido dos motores e do IR.
 Em `src/Body/main.cpp`, `HABILITAR_AVANCO_BOLA_DEFESA` habilita esse avanço
 quando `true`; com `false`, a defesa continua funcionando sem o avanço
 temporizado. A alteração exige recompilar o firmware.
@@ -187,7 +176,7 @@ não desaparecer. Os tempos estão em `FugaLinha.cpp`.
 
 ## Curva J e intensidade do IR
 
-O desvio máximo do J é de 4,8°, 8,8° ou 16,6° conforme a proximidade
+O desvio máximo do J é de 4,8°, 9° ou 16,6° conforme a proximidade
 estimada. Até 45° o movimento aponta diretamente para a bola; de 45° a 90°
 ele passa gradualmente para o contorno. Em 110° a direção é para trás e,
 acima disso, o desvio cresce quadraticamente. As transições em 45°, 90° e
@@ -206,9 +195,6 @@ concentração direcional, não distância. **Esses limiares são provisórios, 
 representam distância em centímetros e dependem da bola, orientação, sensores
 e ambiente.** Registre leituras em várias distâncias e ângulos para calibrá-los.
 Teste primeiro com o robô suspenso e depois em área delimitada.
-
-O teste local da curva pode ser executado com
-`g++ -std=c++11 -I include src/TESTS/TEST_MOVIMENTO_BOLA/test.cpp -o /tmp/test-movimento-bola && /tmp/test-movimento-bola`.
 
 ## Avanço prioritário da defesa
 

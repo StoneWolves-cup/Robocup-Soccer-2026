@@ -79,7 +79,8 @@ namespace ConfigPinos {
         // Ordem dos sensores na coroa, do índice 0 em diante no sentido horário.
             constexpr uint8_t PINOS[16] = {
                  //42, 41, 40, 39, 38, 48, 47, 21, 16, 15, 7, 6, 5, 4, 2
-                1, 2, 4, 5, 6, 7, 15, 16, 21, 47, 48, 38, 39, 40, 41, 42
+                 //2, 4, 5, 6, 7, 15, 16, 21, 47, 48, 38, 39, 40, 41, 42
+                1, 42, 41, 40, 39, 38, 48, 47, 21, 16, 15, 7, 6, 5, 4, 2
             };
         }  // namespace TSSP
     }  // namespace Head

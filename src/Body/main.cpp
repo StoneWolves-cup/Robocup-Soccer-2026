@@ -51,7 +51,7 @@ namespace {
   constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
   constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
   // IR e BNO sao requisitos da estrategia e bloqueiam o movimento quando ausentes.
-  constexpr bool USAR_LDR = false;
+  constexpr bool USAR_LDR = true;
   constexpr bool USAR_ESPNOW = false;
   constexpr bool USAR_BNO = true;
   constexpr bool USAR_IR = true;
@@ -62,19 +62,24 @@ namespace {
   constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
   constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
   constexpr uint32_t TIMEOUT_BNO_MS = 250;
-  constexpr float POTENCIA_MAXIMA_MOTORES = 1.00f;
+  constexpr float POTENCIA_MAXIMA_MOTORES = 0.8;
   constexpr float FATOR_AJUSTE_KP_RUMO = 1.05f;
   constexpr float VELOCIDADE_CORRECAO_LINHA = 0.80f;
   constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.80f;
-  constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 1.2360f;
+  constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 2.0f;
   constexpr float PASSO_ROTACAO_BNO_MOVE = 0.005f;
   constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 3000;
-  constexpr float ZONA_MORTA_RUMO_GRAUS = 1.2360f;
+  constexpr float ZONA_MORTA_RUMO_GRAUS = 2.0f;
   constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
   constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
   constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
   constexpr float ESCALA_GYRO_FUZZY_GRAUS_POR_SEGUNDO = 74.1656f;
   constexpr float VELOCIDADE_RECUO_LDR_INFERIOR = 0.80f;
+  constexpr float KP_LATERAL_IR = 0.025f;
+  constexpr float KI_LATERAL_IR = 0.001f;
+  constexpr float KD_LATERAL_IR = 0.002f;
+  constexpr float LIMITE_INTEGRAL_LATERAL_IR = 80.0f;
+  constexpr float LIMITE_DERIVADA_IR = 180.0f;
   struct QuadroRecebido {
     IRActivityPacket pacote;
     uint32_t recebidoEmMs;
@@ -151,10 +156,49 @@ namespace {
   PID pidBnoMove(PIDConfig::KP_PADRAO, PIDConfig::KI_PADRAO,
                  PIDConfig::KD_PADRAO, -ROTACAO_MAXIMA_BNO_MOVE,
                  ROTACAO_MAXIMA_BNO_MOVE);
+  PID pidLateralIR(KP_LATERAL_IR, KI_LATERAL_IR, KD_LATERAL_IR,
+                   -MovimentoDefesa::VELOCIDADE_LATERAL_MAXIMA,
+                   MovimentoDefesa::VELOCIDADE_LATERAL_MAXIMA);
+  bool controleLateralIRIniciado = false;
+  float anguloLateralIRAnterior = 0.0f;
+  float comandoLateralIR = 0.0f;
+  uint32_t ultimoCalculoLateralIRMs = 0;
   float rumoReferenciaBnoMove = 0.0f;
   float rotacaoBnoMove = 0.0f;
   uint32_t ultimoCalculoBnoMoveUs = 0;
   bool controleBnoMoveIniciado = false;
+
+  void resetarControleLateralIR() {
+    pidLateralIR.reset();
+    controleLateralIRIniciado = false;
+    comandoLateralIR = 0.0f;
+  }
+
+  float calcularComandoLateralIR(bool quadroNovo, float anguloGraus,
+                                 uint32_t agoraMs) {
+    const float erro = erroAngular(anguloGraus, 0.0f);
+    if (fabsf(erro) <= MovimentoDefesa::ANGULO_ZONA_MORTA_GRAUS) {
+      resetarControleLateralIR();
+      return 0.0f;
+    }
+    if (controleLateralIRIniciado && !quadroNovo) return comandoLateralIR;
+
+    float dt = 0.02f;
+    float derivadaErro = 0.0f;
+    if (controleLateralIRIniciado) {
+      const uint32_t decorridoMs = agoraMs - ultimoCalculoLateralIRMs;
+      if (decorridoMs == 0) return comandoLateralIR;
+      dt = decorridoMs / 1000.0f;
+      derivadaErro = constrain(
+          erroAngular(erro, anguloLateralIRAnterior) / dt,
+          -LIMITE_DERIVADA_IR, LIMITE_DERIVADA_IR);
+    }
+    controleLateralIRIniciado = true;
+    anguloLateralIRAnterior = erro;
+    ultimoCalculoLateralIRMs = agoraMs;
+    comandoLateralIR = pidLateralIR.calculate(erro, -derivadaErro, dt);
+    return comandoLateralIR;
+  }
 
   const char *descricaoOrigemFuga(FugaLinha::OrigemCorrecao origem) {
     switch (origem) {
@@ -207,6 +251,7 @@ namespace {
     controleBnoMoveIniciado = false;
     pidRumo.reset();
     pidBnoMove.reset();
+    resetarControleLateralIR();
     ultimaCorrecaoRumo = 0.0f;
     ultimoCalculoPIDUs = micros();
     bytesNoBufferUART = 0;
@@ -565,6 +610,7 @@ namespace {
                                  bool irTelemetriaValida,
                                  bool ultraTelemetriaValida) {
     if (!USAR_ULTRASSONICOS) {
+      resetarControleLateralIR();
       informarBloqueioMovimento(
           "estrategia de defesa requer ultrassonicos habilitados.");
       avancoBolaDefesa.interromper(millis());
@@ -574,6 +620,7 @@ namespace {
 
     if (USAR_BNO &&
         (!bnoTelemetriaValida || !defesaRumoDefinida)) {
+      resetarControleLateralIR();
       pidRumo.reset();
       ultimoCalculoPIDUs = micros();
       informarBloqueioMovimento(
@@ -598,6 +645,7 @@ namespace {
         ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR] >= 2.0f &&
         ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR] <= 430.0f;
     if (!ultrassomTraseiroValido) {
+      resetarControleLateralIR();
       informarBloqueioMovimento(
           "aguardando ultrassom traseiro valido e recente.");
       avancoBolaDefesa.interromper(millis());
@@ -639,10 +687,14 @@ namespace {
     const bool avancoBolaAtivo = HABILITAR_AVANCO_BOLA_DEFESA &&
         avancoBolaDefesa.atualizar(millis(), bolaValida, bolaPerto,
                                    proximidadeBola, ultimaDirecaoBola);
-    float x = bolaValida
-        ? MovimentoDefesa::comandoLateral(ultimaDirecaoBola, proximidadeBola)
-        : MovimentoDefesa::comandoCentroU1(
-              distanciaDireitaCm, ultrassomDireitoValido);
+    float x;
+    if (bolaValida && !avancoBolaAtivo) {
+      x = calcularComandoLateralIR(quadroNovo, ultimaDirecaoBola, millis());
+    } else {
+      resetarControleLateralIR();
+      x = MovimentoDefesa::comandoCentroU1(
+          distanciaDireitaCm, ultrassomDireitoValido);
+    }
     float y = -MovimentoDefesa::comandoDistancia(distanciaTraseiraCm);
 
     if (avancoBolaAtivo) {
@@ -653,6 +705,7 @@ namespace {
     x = MovimentoDefesa::limitarComandoLateral(
         x, distanciaDireitaCm, ultrassomDireitoValido,
         distanciaEsquerdaCm, ultrassomEsquerdoValido);
+    if (x != comandoLateralAntesLimite) resetarControleLateralIR();
     const char *fase = x != comandoLateralAntesLimite
         ? "limite lateral 43 cm"
         : avancoBolaAtivo
@@ -861,6 +914,7 @@ void setup() {
   Serial1.begin(HEAD_BODY_UART_BAUD, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   pidRumo.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
   pidBnoMove.setIntegralLimit(LIMITE_INTEGRAL_RUMO);
+  pidLateralIR.setIntegralLimit(LIMITE_INTEGRAL_LATERAL_IR);
   ultimoCalculoPIDUs = micros();
   motores.begin();
   motores.parar();
@@ -927,6 +981,7 @@ void loop() {
   }
   if (!estrategiaDefesaExecutando) {
     avancoBolaDefesa.resetar();
+    resetarControleLateralIR();
   }
 
   if (USAR_LDR) {
@@ -1031,6 +1086,7 @@ void loop() {
   }
 
   if (IHM_testeTSSPAtivo()) {
+    resetarControleLateralIR();
     pidRumo.reset();
     ultimaCorrecaoRumo = 0.0f;
     ultimoCalculoPIDUs = micros();
@@ -1039,6 +1095,7 @@ void loop() {
   }
 
   if (IHM_testeBNOMoveAtivo()) {
+    resetarControleLateralIR();
     pidRumo.reset();
     ultimaCorrecaoRumo = 0.0f;
     ultimoCalculoPIDUs = micros();

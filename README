@@ -115,11 +115,11 @@ O mesmo firmware do Body contém as duas estratégias; a escolha é feita na IHM
 
 ### Atacante
 
-O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoBola.h](include/MovimentoBola.h)): quando a bola está à frente (até 45°), o robô avança em direção a ela; quando ela está ao lado ou atrás, ele contorna a bola em vez de ir direto, para não empurrá-la para trás e chegar alinhado ao gol. O desvio do contorno cresce com a proximidade da bola (4,8°, 8,8° e 16,6°). O fim de curso aciona o kicker quando a comunicação, a bateria e as leituras ultrassônicas atendem às condições descritas em [TEST.md](src/TESTS/TEST.md#kicker-duplo).
+O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoBola.h](include/MovimentoBola.h)): quando a bola está à frente (até 45°), o robô avança em direção a ela; quando ela está ao lado ou atrás, ele contorna a bola em vez de ir direto, para não empurrá-la para trás e chegar alinhado ao gol. O desvio do contorno cresce com a proximidade da bola (4,8°, 9° e 16,6°). O fim de curso aciona o kicker quando a comunicação, a bateria e as leituras ultrassônicas atendem às condições descritas em [TEST.md](src/TESTS/TEST.md#kicker-duplo).
 
 ### Goleiro
 
-O goleiro ([MovimentoDefesa.h](include/MovimentoDefesa.h)) mantém-se a cerca de 40 cm da parede traseira, medida pelo ultrassônico traseiro (com zona morta de 6 cm), e desloca-se lateralmente para ficar alinhado com a bola. A velocidade lateral aumenta com o ângulo da bola (zona morta de 2°). Ultrassônicos laterais limitam o afastamento da parede e ajudam a manter o robô centralizado, e os LDRs podem priorizar um avanço para evitar sair da área ou sair do campo.
+O goleiro ([MovimentoDefesa.h](include/MovimentoDefesa.h)) mantém-se a cerca de 40 cm da parede traseira, medida pelo ultrassônico traseiro (com zona morta de ±3 cm), e usa um PID para acompanhar lateralmente a bola, com zona morta de ±2° no IR. Ultrassônicos laterais limitam o deslocamento e ajudam a manter o robô centralizado. A correção de rumo continua independente, usando o BNO.
 
 ### Detecção da Bola
 
