@@ -51,7 +51,7 @@ namespace {
   constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
   constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
   // IR e BNO sao requisitos da estrategia e bloqueiam o movimento quando ausentes.
-  constexpr bool USAR_LDR = true;
+  constexpr bool USAR_LDR = false;
   constexpr bool USAR_ESPNOW = false;
   constexpr bool USAR_BNO = true;
   constexpr bool USAR_IR = true;
@@ -62,7 +62,7 @@ namespace {
   constexpr int UART_RX_PIN = ConfigPinos::Geral::UART1::RX;
   constexpr int UART_TX_PIN = ConfigPinos::Geral::UART1::TX;
   constexpr uint32_t TIMEOUT_BNO_MS = 250;
-  constexpr float POTENCIA_MAXIMA_MOTORES = 0.8;
+  constexpr float POTENCIA_MAXIMA_MOTORES = 1.0;
   constexpr float FATOR_AJUSTE_KP_RUMO = 1.05f;
   constexpr float VELOCIDADE_CORRECAO_LINHA = 0.80f;
   constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.80f;
@@ -133,6 +133,7 @@ namespace {
   uint32_t ultimaMensagemBloqueioMs = 0;
   bool ultimaBolaDetectada = false;
   ProximidadeIR::Filtro filtroProximidadeIR;
+  MovimentoBola::ControladorJ controladorJ;
   MovimentoDefesa::AvancoBolaTemporizado avancoBolaDefesa;
   float ultimaDirecaoBola = 0.0f;
   float ultimaCorrecaoRumo = 0.0f;
@@ -247,6 +248,7 @@ namespace {
     ultimoRecebimentoUltraMs = 0;
     referenciaRumoDefinida = false;
     filtroProximidadeIR.resetar();
+    controladorJ.resetar();
     fugaLinha.resetar();
     controleBnoMoveIniciado = false;
     pidRumo.reset();
@@ -839,11 +841,6 @@ namespace {
   }
 
 
-  bool bolaNoSetorFrontal(float anguloGraus) {
-    const float anguloAssinado = erroAngular(anguloGraus, 0.0f);
-    return fabsf(anguloAssinado) <= MovimentoBola::ANGULO_SETOR_FRONTAL_GRAUS;
-  }
-
   // Converte rumo da bola em comando omnidirecional; sem bola confiavel, para
   // explicitamente os motores em vez de perseguir um vetor antigo.
   void decidirMovimento(bool bolaDetectada, float anguloGraus, float rotacao,
@@ -851,15 +848,17 @@ namespace {
     if (!bolaDetectada) {
       informarBloqueioMovimento(
           "Head nao detecta bola (atividade abaixo do limiar de confianca).");
+      controladorJ.resetar();
       motores.parar();
       return;
     }
 
-    const bool emCurva = !bolaNoSetorFrontal(anguloGraus);
     const ProximidadeIR::Estimativa &proximidade =
         filtroProximidadeIR.estimativa();
     const float anguloMovimentoGraus =
-        MovimentoBola::calcularAnguloJ(anguloGraus, proximidade.indice);
+        controladorJ.calcularAngulo(anguloGraus, proximidade.indice);
+    const bool emCurva = fabsf(
+        anguloMovimentoGraus - erroAngular(anguloGraus, 0.0f)) >= 0.5f;
     const float anguloMovimentoRad = anguloMovimentoGraus * DEG_TO_RAD;
     const float x = sinf(anguloMovimentoRad) * VELOCIDADE_CORRECAO_LINHA;
     const float y = cosf(anguloMovimentoRad) * VELOCIDADE_CORRECAO_LINHA;

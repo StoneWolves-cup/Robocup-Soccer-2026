@@ -176,21 +176,22 @@ não desaparecer. Os tempos estão em `FugaLinha.cpp`.
 
 ## Curva J e intensidade do IR
 
-O desvio máximo do J é de 4,8°, 9° ou 16,6° conforme a proximidade
-estimada. Até 45° o movimento aponta diretamente para a bola; de 45° a 90°
-ele passa gradualmente para o contorno. Em 110° a direção é para trás e,
-acima disso, o desvio cresce quadraticamente. As transições em 45°, 90° e
-110° são contínuas.
+O desvio máximo do J varia gradualmente de 6° (bola longe), 12° (proximidade
+média) a 24° (bola perto). O movimento começa a se afastar da direção da bola
+a partir de 70°; a curva cresce suavemente até 180°. O lado da curva é mantido
+quando a bola está quase atrás, evitando que o robô troque de lado por pequenas
+variações do ângulo IR.
 
-A estimativa combina com pesos iguais o maior percentual de atividade dos TSSP
-e o número de sensores com atividade acima de 2%. Cada indicador é limitado
-entre 0 e 1: a atividade usa os pontos 2% e 25%, e a contagem usa 1 e 5 sensores.
-O resultado é suavizado a cada pacote IR válido (fator 0,2) e reiniciado quando
-a bola é perdida ou a telemetria expira. Os parâmetros estão em
-`include/ProximidadeIR.h`; os limites do J, em `include/MovimentoBola.h`.
+A estimativa combina com pesos iguais a atividade máxima dos TSSP e a contagem
+de sensores acima do limiar de 1%. Cada indicador é limitado entre 0 e 1: a
+atividade usa os pontos 6,7% e 24%, e a contagem usa 1 e 3 sensores. O resultado
+é suavizado a cada pacote IR válido (fator 0,3) e reiniciado quando a bola é
+perdida ou a telemetria expira. Os parâmetros estão em `include/ProximidadeIR.h`;
+os limites do J, em `include/MovimentoBola.h`.
 
-Em **Telemetria > Infra IR** e no monitor serial aparecem `LONGE`, `MEDIA` ou
-`PERTO`, o índice relativo, o máximo e a contagem. `conf` no serial é a
+Em **Telemetria > Infra IR** e no monitor serial aparecem `MUITO LONGE`,
+`MEDIA DISTANTE`, `MEDIA` ou `PERTO`, o índice relativo, o máximo e a contagem.
+`conf` no serial é a
 concentração direcional, não distância. **Esses limiares são provisórios, não
 representam distância em centímetros e dependem da bola, orientação, sensores
 e ambiente.** Registre leituras em várias distâncias e ângulos para calibrá-los.

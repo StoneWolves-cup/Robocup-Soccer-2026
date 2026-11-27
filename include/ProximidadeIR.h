@@ -6,13 +6,15 @@
 
 namespace ProximidadeIR {
 // Valores iniciais para calibrar com a bola real e as condicoes do campo.
-constexpr uint8_t LIMIAR_SENSOR_ATIVO = 2;
+constexpr uint8_t LIMIAR_SENSOR_ATIVO = 1;
 constexpr float ATIVIDADE_LONGE = 6.7f;
-constexpr float ATIVIDADE_PERTO = 25.0f;
+constexpr float ATIVIDADE_PERTO = 24.0f;
 constexpr float SENSORES_LONGE = 1.0f;
-constexpr float SENSORES_PERTO = 4.0f;
-constexpr float FILTRO_ALPHA = 0.2f;
-constexpr float INDICE_MINIMO_PERTO = 2.0f / 3.0f;
+constexpr float SENSORES_PERTO = 3.0f;
+constexpr float FILTRO_ALPHA = 0.3f;
+constexpr float INDICE_MINIMO_MEDIA_DISTANTE = 0.40f;
+constexpr float INDICE_MINIMO_MEDIA = 0.75f;
+constexpr float INDICE_MINIMO_PERTO = 0.80f;
 
 struct Estimativa {
   float indice = 0.0f;
@@ -61,7 +63,8 @@ class Filtro {
 };
 
 inline const char *descricao(float indice) {
-  return indice < 1.0f / 3.0f ? "LONGE" :
+  return indice < INDICE_MINIMO_MEDIA_DISTANTE ? "MUITO LONGE" :
+         indice < INDICE_MINIMO_MEDIA ? "MEDIA DISTANTE" :
          indice < INDICE_MINIMO_PERTO ? "MEDIA" : "PERTO";
 }
 
