@@ -124,7 +124,7 @@ void Kicker::begin() {
 void Kicker::atualizar(ModoAutomatico modo, bool comunicacaoValida,
                        bool bateriaValida, float bateriaPercentual,
                        bool ultraValido, const float distancias[4],
-                       uint8_t mascaraUltra) {
+                       uint8_t mascaraUltra, bool bolaPerto) {
   if (!temporizador || temporizadorFalhou) return;
   const bool bateriaOk =
       KickerLogica::bateriaPermite(bateriaValida, bateriaPercentual);
@@ -143,6 +143,8 @@ void Kicker::atualizar(ModoAutomatico modo, bool comunicacaoValida,
   const bool modoAtivo = modo != ModoAutomatico::Desativado;
   const bool precisaUltrassom = modo == ModoAutomatico::ComUltrassom ||
       modoAtaquePersonalizado;
+  const bool precisaComunicacao = precisaUltrassom ||
+      modo == ModoAutomatico::Defesa;
 
   portENTER_CRITICAL(&trava);
   const bool pendente = disparoPendente;
@@ -150,14 +152,15 @@ void Kicker::atualizar(ModoAutomatico modo, bool comunicacaoValida,
   const uint32_t fimMs = fimDisparoMs;
   if (disparoAutomatico &&
       (!modoAtivo || !bateriaOk ||
-       (precisaUltrassom && (!comunicacaoValida || !ultrasOk)))) {
+       (precisaComunicacao && !comunicacaoValida) ||
+       (precisaUltrassom && !ultrasOk))) {
     digitalWrite(IN_ESQUERDA, NIVEL_KICKER_DESATIVADO);
     digitalWrite(IN_DIREITA, NIVEL_KICKER_DESATIVADO);
   }
   portEXIT_CRITICAL(&trava);
 
   if (!modoAtivo) { informarBloqueio("modo automatico inativo"); return; }
-  if (precisaUltrassom && !comunicacaoValida) {
+  if (precisaComunicacao && !comunicacaoValida) {
     informarBloqueio("UART desconectada"); return;
   }
   if (!bateriaOk) { informarBloqueio("bateria invalida ou abaixo de 40%"); return; }
@@ -167,6 +170,7 @@ void Kicker::atualizar(ModoAutomatico modo, bool comunicacaoValida,
   informarBloqueio(nullptr);
   if (pendente || !KickerLogica::cooldownConcluido(disparou, fimMs, millis()))
     return;
+  if (modo == ModoAutomatico::Defesa && !bolaPerto) return;
   if (!modoAtaquePersonalizado && digitalRead(FIM_CURSO) != HIGH) return;
   KickerLogica::Lado lado = KickerLogica::Lado::Ambos;
   if (modoAtaquePersonalizado) {

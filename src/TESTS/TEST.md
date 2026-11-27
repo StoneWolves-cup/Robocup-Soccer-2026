@@ -76,10 +76,12 @@ a defesa ou quando o avanço e os limites laterais substituem seu comando.
 A rotação continua vindo exclusivamente do BNO. Sem bola, a defesa usa U1 para
 retornar ao centro; uma leitura traseira inválida ou expirada bloqueia os motores.
 
-Quando a bola permanece detectada, classificada como `PERTO` e dentro do
-limiar angular adaptativo por 3 s, a defesa faz um avanço apontado para a bola
-durante 800 ms, seguido de cooldown de 5 s. O limiar do avanço varia de 1° a
-10° conforme a proximidade e é independente da zona morta do PID lateral.
+Quando a bola permanece detectada, classificada como `MEDIA DISTANTE`, `MEDIA`
+ou `PERTO` e dentro do limiar angular adaptativo por 1,2 s, a defesa faz um
+avanço apontado para a bola durante até 2 s, seguido de cooldown de 500 ms.
+O avanço é interrompido se a bola for perdida ou passar a `MUITO LONGE`. O
+limiar angular varia de 3° a 14° conforme a proximidade e é independente da
+zona morta do PID lateral.
 O avanço mantém a correção de rumo do BNO e está sujeito aos limites laterais.
 Os ganhos do PID lateral são valores iniciais e devem ser ajustados com o robô
 suspenso e depois em campo; confirme também o sentido dos motores e do IR.
@@ -205,13 +207,8 @@ ativo, correções das regiões LDR são ignoradas, mas o controle lateral norma
 da defesa e a correção de rumo continuam. Leitura inválida de U4 encerra o
 estado e para o movimento com segurança.
 
-O teste local dessa decisão pode ser executado com
-`g++ -std=c++11 -I include src/TESTS/TEST_MOVIMENTO_DEFESA/test.cpp -o /tmp/test-movimento-defesa && /tmp/test-movimento-defesa`.
-
-Esse teste também valida os limites angulares, a estabilidade de 2 s, o
-proximidade `PERTO`, o avanço de 800 ms e o cooldown de 10 s. Use-o primeiro com o robô suspenso; a
-automação só deve ser usada em conformidade com o regulamento vigente da
-RoboCup Soccer Infrared.
+Teste primeiro com o robô suspenso; a automação só deve ser usada em
+conformidade com o regulamento vigente da RoboCup Soccer Infrared.
 
 ## Correção de rumo e teste BNO-MOVE
 

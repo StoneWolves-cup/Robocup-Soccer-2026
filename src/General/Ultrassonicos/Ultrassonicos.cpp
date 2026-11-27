@@ -2,7 +2,7 @@
 #include <driver/gpio.h>
 
 namespace {
-constexpr uint32_t TIMEOUT_ECHO_US = 5000;
+constexpr uint32_t TIMEOUT_ECHO_US = 30000;
 
 volatile uint32_t inicioPulsoUs[Ultrassonicos::QUANTIDADE] = {};
 volatile uint32_t duracaoPulsoUs[Ultrassonicos::QUANTIDADE] = {};
@@ -119,6 +119,6 @@ void Ultrassonicos::ler(float distanciasCm[QUANTIDADE],
                         bool leiturasValidas[QUANTIDADE]) {
   iniciarLeitura();
   while (!atualizar(distanciasCm, leiturasValidas)) {
-    delay(20);
+    delay(1);
   }
 }

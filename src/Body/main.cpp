@@ -50,8 +50,9 @@ namespace {
   constexpr uint32_t TIMEOUT_ULTRA_MS = 350;
   constexpr uint32_t INTERVALO_DIAGNOSTICO_UART_MS = 1000;
   constexpr size_t TAMANHO_BUFFER_RX_UART = 4096;
+  constexpr uint8_t AMOSTRAS_MEDIA_ULTRA_DEFESA = 3;
   // IR e BNO sao requisitos da estrategia e bloqueiam o movimento quando ausentes.
-  constexpr bool USAR_LDR = false;
+  constexpr bool USAR_LDR = true;
   constexpr bool USAR_ESPNOW = false;
   constexpr bool USAR_BNO = true;
   constexpr bool USAR_IR = true;
@@ -66,10 +67,10 @@ namespace {
   constexpr float FATOR_AJUSTE_KP_RUMO = 1.05f;
   constexpr float VELOCIDADE_CORRECAO_LINHA = 0.80f;
   constexpr float ROTACAO_MAXIMA_BNO_MOVE = 0.80f;
-  constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 2.0f;
+  constexpr float ZONA_MORTA_BNO_MOVE_GRAUS = 0.9f;
   constexpr float PASSO_ROTACAO_BNO_MOVE = 0.005f;
   constexpr uint32_t INTERVALO_PID_BNO_MOVE_US = 3000;
-  constexpr float ZONA_MORTA_RUMO_GRAUS = 2.0f;
+  constexpr float ZONA_MORTA_RUMO_GRAUS = 1.4;
   constexpr float ROTACAO_MAXIMA_CORRECAO = 0.80f;
   constexpr float LIMITE_INTEGRAL_RUMO = 300.0f;
   constexpr float ESCALA_ERRO_FUZZY_GRAUS = 18.5414f;
@@ -109,6 +110,11 @@ namespace {
   IRActivityPacket ultimoPacote{};
   BNODataPacket ultimoPacoteBNO{};
   UltraDataPacket ultimoPacoteUltra{};
+  float leiturasUltraDefesa[ULTRA_SENSOR_COUNT]
+                           [AMOSTRAS_MEDIA_ULTRA_DEFESA] = {};
+  float somasUltraDefesa[ULTRA_SENSOR_COUNT] = {};
+  uint8_t indicesUltraDefesa[ULTRA_SENSOR_COUNT] = {};
+  uint8_t quantidadesUltraDefesa[ULTRA_SENSOR_COUNT] = {};
   uint32_t ultimoRecebimentoMs = 0;
   bool pacoteInicialRecebido = false;
   uint32_t ultimoRecebimentoBNOMs = 0;
@@ -560,6 +566,42 @@ namespace {
     return disponivel;
   }
 
+  void resetarMediaUltrassomDefesa() {
+    memset(leiturasUltraDefesa, 0, sizeof(leiturasUltraDefesa));
+    memset(somasUltraDefesa, 0, sizeof(somasUltraDefesa));
+    memset(indicesUltraDefesa, 0, sizeof(indicesUltraDefesa));
+    memset(quantidadesUltraDefesa, 0, sizeof(quantidadesUltraDefesa));
+  }
+
+  void atualizarMediaUltrassomDefesa(const UltraDataPacket &pacote) {
+    for (uint8_t i = 0; i < ULTRA_SENSOR_COUNT; ++i) {
+      if ((pacote.validMask & (1U << i)) == 0) {
+        somasUltraDefesa[i] = 0.0f;
+        indicesUltraDefesa[i] = 0;
+        quantidadesUltraDefesa[i] = 0;
+        continue;
+      }
+
+      const uint8_t indice = indicesUltraDefesa[i];
+      if (quantidadesUltraDefesa[i] == AMOSTRAS_MEDIA_ULTRA_DEFESA) {
+        somasUltraDefesa[i] -= leiturasUltraDefesa[i][indice];
+      } else {
+        ++quantidadesUltraDefesa[i];
+      }
+      leiturasUltraDefesa[i][indice] = pacote.distanceCm[i];
+      somasUltraDefesa[i] += pacote.distanceCm[i];
+      indicesUltraDefesa[i] =
+          (indice + 1) % AMOSTRAS_MEDIA_ULTRA_DEFESA;
+    }
+  }
+
+  bool obterMediaUltrassomDefesa(uint8_t indice, float &distanciaCm) {
+    if (quantidadesUltraDefesa[indice] == 0) return false;
+    distanciaCm = somasUltraDefesa[indice] / quantidadesUltraDefesa[indice];
+    return isfinite(distanciaCm) && distanciaCm >= 2.0f &&
+        distanciaCm <= 430.0f;
+  }
+
   // Converte qualquer angulo para [0, 360), util para comparacoes de setores.
   float normalizarAngulo360(float anguloGraus) {
     anguloGraus = fmodf(anguloGraus, 360.0f);
@@ -608,6 +650,7 @@ namespace {
   }
 
   void executarEstrategiaDefesa(bool quadroNovo, bool quadroBnoNovo,
+                                 bool quadroUltraNovo,
                                  bool bnoTelemetriaValida,
                                  bool irTelemetriaValida,
                                  bool ultraTelemetriaValida) {
@@ -618,6 +661,12 @@ namespace {
       avancoBolaDefesa.interromper(millis());
       motores.parar();
       return;
+    }
+
+    if (!ultraTelemetriaValida) {
+      resetarMediaUltrassomDefesa();
+    } else if (quadroUltraNovo) {
+      atualizarMediaUltrassomDefesa(ultimoPacoteUltra);
     }
 
     if (USAR_BNO &&
@@ -640,12 +689,14 @@ namespace {
       ultimaCorrecaoRumo = 0.0f;
     }
 
+    float distanciaTraseiraCm = 0.0f;
     const bool ultrassomTraseiroValido =
         ultraTelemetriaValida &&
         (ultimoPacoteUltra.validMask & (1U << ULTRA_INDEX_REAR)) != 0 &&
         isfinite(ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR]) &&
         ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR] >= 2.0f &&
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR] <= 430.0f;
+        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR] <= 430.0f &&
+        obterMediaUltrassomDefesa(ULTRA_INDEX_REAR, distanciaTraseiraCm);
     if (!ultrassomTraseiroValido) {
       resetarControleLateralIR();
       informarBloqueioMovimento(
@@ -655,39 +706,38 @@ namespace {
       return;
     }
 
+    float distanciaDireitaCm = 0.0f;
     const bool ultrassomDireitoValido =
         ultraTelemetriaValida &&
         (ultimoPacoteUltra.validMask & (1U << ULTRA_INDEX_RIGHT)) != 0 &&
         isfinite(ultimoPacoteUltra.distanceCm[ULTRA_INDEX_RIGHT]) &&
         ultimoPacoteUltra.distanceCm[ULTRA_INDEX_RIGHT] >= 2.0f &&
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_RIGHT] <= 430.0f;
-    const float distanciaDireitaCm =
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_RIGHT];
+        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_RIGHT] <= 430.0f &&
+        obterMediaUltrassomDefesa(ULTRA_INDEX_RIGHT, distanciaDireitaCm);
+    float distanciaEsquerdaCm = 0.0f;
     const bool ultrassomEsquerdoValido =
         ultraTelemetriaValida &&
         (ultimoPacoteUltra.validMask & (1U << ULTRA_INDEX_LEFT)) != 0 &&
         isfinite(ultimoPacoteUltra.distanceCm[ULTRA_INDEX_LEFT]) &&
         ultimoPacoteUltra.distanceCm[ULTRA_INDEX_LEFT] >= 2.0f &&
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_LEFT] <= 430.0f;
-    const float distanciaEsquerdaCm =
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_LEFT];
+        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_LEFT] <= 430.0f &&
+        obterMediaUltrassomDefesa(ULTRA_INDEX_LEFT, distanciaEsquerdaCm);
     const bool faixaCentralU1 = USAR_LDR &&
         MovimentoDefesa::faixaCentralU1(
             distanciaDireitaCm, ultrassomDireitoValido);
-    const float distanciaTraseiraCm =
-        ultimoPacoteUltra.distanceCm[ULTRA_INDEX_REAR];
     const bool inferior = faixaCentralU1 &&
         ldrFixed.regiaoBranca(LDRFixed::Inferior);
     const bool bolaValida =
         USAR_IR && irTelemetriaValida && ultimaBolaDetectada;
-    const bool bolaPerto = bolaValida &&
+    const bool bolaNaFaixaAvanco = bolaValida &&
         filtroProximidadeIR.estimativa().valida &&
-        ProximidadeIR::estaPerto(filtroProximidadeIR.estimativa().indice);
+        filtroProximidadeIR.estimativa().indice >=
+            ProximidadeIR::INDICE_MINIMO_MEDIA_DISTANTE;
     const float proximidadeBola = filtroProximidadeIR.estimativa().valida
         ? filtroProximidadeIR.estimativa().indice
         : 0.0f;
     const bool avancoBolaAtivo = HABILITAR_AVANCO_BOLA_DEFESA &&
-        avancoBolaDefesa.atualizar(millis(), bolaValida, bolaPerto,
+        avancoBolaDefesa.atualizar(millis(), bolaValida, bolaNaFaixaAvanco,
                                    proximidadeBola, ultimaDirecaoBola);
     float x;
     if (bolaValida && !avancoBolaAtivo) {
@@ -981,6 +1031,7 @@ void loop() {
   if (!estrategiaDefesaExecutando) {
     avancoBolaDefesa.resetar();
     resetarControleLateralIR();
+    resetarMediaUltrassomDefesa();
   }
 
   if (USAR_LDR) {
@@ -1009,12 +1060,14 @@ void loop() {
 
   UltraDataPacket pacoteUltra{};
   uint32_t recebidoUltraEmMs = 0;
+  bool quadroUltraNovo = false;
   if (obterQuadroUltra(pacoteUltra, recebidoUltraEmMs)) {
     if (!sequenciaUltraIniciada ||
         (int16_t)(pacoteUltra.sequence - ultimaSequenciaUltra) > 0) {
       ultimaSequenciaUltra = pacoteUltra.sequence;
       sequenciaUltraIniciada = true;
       ultimoPacoteUltra = pacoteUltra;
+      quadroUltraNovo = true;
       pacoteUltraInicialRecebido = true;
       ultimoRecebimentoUltraMs = recebidoUltraEmMs;
     }
@@ -1068,10 +1121,17 @@ void loop() {
           ? Kicker::ModoAutomatico::ComUltrassom
           : estrategiaAtaqueAtiva
               ? Kicker::ModoAutomatico::AtaqueUltrassomDireito
-              : Kicker::ModoAutomatico::Desativado;
+              : estrategiaDefesaExecutando
+                  ? Kicker::ModoAutomatico::Defesa
+                  : Kicker::ModoAutomatico::Desativado;
+  const ProximidadeIR::Estimativa &proximidadeBola =
+      filtroProximidadeIR.estimativa();
+  const bool bolaPerto = irTelemetriaValida && ultimaBolaDetectada &&
+      proximidadeBola.valida && ProximidadeIR::estaPerto(proximidadeBola.indice);
   Kicker::atualizar(modoKicker, !uartReconectando,
                     bateriaValida, bateriaPercentual, ultraTelemetriaValida,
-                    ultimoPacoteUltra.distanceCm, ultimoPacoteUltra.validMask);
+                    ultimoPacoteUltra.distanceCm, ultimoPacoteUltra.validMask,
+                    bolaPerto);
 
   if (uartReconectando) {
     informarBloqueioMovimento(
@@ -1197,6 +1257,7 @@ void loop() {
 
   if (estrategiaDefesaAtiva) {
     executarEstrategiaDefesa(quadroNovo, quadroBnoNovo,
+                             quadroUltraNovo,
                              bnoTelemetriaValida, irTelemetriaValida,
                              ultraTelemetriaValida);
     fugaLinha.resetar();

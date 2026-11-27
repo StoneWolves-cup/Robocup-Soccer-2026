@@ -138,6 +138,8 @@ O atacante vai em direção à bola seguindo uma trajetória em "J" ([MovimentoB
 
 O goleiro ([MovimentoDefesa.h](include/MovimentoDefesa.h)) mantém-se a cerca de 40 cm da parede traseira, medida pelo ultrassônico traseiro (com zona morta de ±3 cm), e usa um PID para acompanhar lateralmente a bola, com zona morta de ±2° no IR. Ultrassônicos laterais limitam o deslocamento e ajudam a manter o robô centralizado. A correção de rumo continua independente, usando o BNO.
 
+Na defesa, os dois kickers disparam quando o fim de curso está acionado e a bola é detectada como **PERTO** pelo IR (índice de proximidade de pelo menos 0,80). São necessárias comunicação válida e bateria válida de pelo menos 40%; o pulso e o intervalo entre disparos seguem as proteções normais do kicker.
+
 ### Detecção da Bola
 
 O Head soma a atividade dos 16 receptores TSSP (espaçados de 22,5°) como vetores, depois de descontar um limiar de ruído. O resultado passa por um filtro exponencial (α = 0,25) para estabilizar a direção. A **confiança** é a razão entre o módulo do vetor e a soma dos pesos: leituras difusas (confiança < 0,15) são rejeitadas. A distância à bola é estimada pela atividade máxima e pelo número de sensores ativos ([ProximidadeIR.h](include/ProximidadeIR.h)).

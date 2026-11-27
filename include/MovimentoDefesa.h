@@ -6,30 +6,30 @@
 #include <stdint.h>
 
 namespace MovimentoDefesa {
-constexpr float DISTANCIA_ALVO_CM = 40.0f;
-constexpr float ZONA_MORTA_DISTANCIA_CM = 3.0f;
+constexpr float DISTANCIA_ALVO_CM = 39.0f;
+constexpr float ZONA_MORTA_DISTANCIA_CM = 2.0f;
 constexpr float GANHO_DISTANCIA = 0.20f;
-constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.60f;
+constexpr float VELOCIDADE_MAXIMA_DISTANCIA = 0.90f;
 constexpr float VELOCIDADE_LATERAL_MAXIMA = 1.0f;
-constexpr float ANGULO_ZONA_MORTA_GRAUS = 1.8f;
+constexpr float ANGULO_ZONA_MORTA_GRAUS = 0.8f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MIN_CM = 48.0f;
 constexpr float DISTANCIA_FAIXA_CENTRAL_U1_MAX_CM = 113.0f;
 constexpr float DISTANCIA_CENTRO_U1_MIN_CM = 65.0f;
 constexpr float DISTANCIA_CENTRO_U1_MAX_CM = 75.0f;
-constexpr float VELOCIDADE_CENTRO_MINIMA = 0.70f;
+constexpr float VELOCIDADE_CENTRO_MINIMA = 0.80f;
 constexpr float GANHO_CENTRO_U1 = 0.18f;
 constexpr float VELOCIDADE_CENTRO_MAXIMA = 0.80f;
-constexpr float DISTANCIA_LIMITE_LATERAL_CM = 30.0f;
+constexpr float DISTANCIA_LIMITE_LATERAL_CM = 45.0f;
 constexpr float VELOCIDADE_AFASTAMENTO_LATERAL = 0.70f;
 constexpr float DISTANCIA_ATIVACAO_AVANCO_LDR_CM = 25.0f; 
-constexpr float ANGULO_ZONA_MORTA_LONGE_GRAUS = 1.0f;
-constexpr float ANGULO_ZONA_MORTA_PERTO_GRAUS = 10.0f;
+constexpr float ANGULO_ZONA_MORTA_LONGE_GRAUS = 0.6f;
+constexpr float ANGULO_ZONA_MORTA_PERTO_GRAUS = 5.0f;
 constexpr float FATOR_EXPONENCIAL_LIMIAR = 3.0f;
 constexpr float NORMALIZADOR_EXPONENCIAL_LIMIAR = 19.0855369f;
 constexpr uint32_t TEMPO_ESTABILIDADE_AVANCO_MS = 3000;
-constexpr uint32_t DURACAO_AVANCO_BOLA_MS = 900;
+constexpr uint32_t DURACAO_AVANCO_BOLA_MS = 1900;
 constexpr uint32_t COOLDOWN_AVANCO_BOLA_MS = 500;
-constexpr float VELOCIDADE_AVANCO_BOLA = 1.00f;
+constexpr float VELOCIDADE_AVANCO_BOLA = 1.0f;
 
 inline float progressoExponencialLimiar(float proximidade) {
   if (!isfinite(proximidade)) proximidade = 0.0f;
@@ -69,10 +69,10 @@ class AvancoBolaTemporizado {
     }
   }
 
-  bool atualizar(uint32_t agoraMs, bool bolaValida, bool bolaPerto,
+  bool atualizar(uint32_t agoraMs, bool bolaValida, bool bolaNaFaixaAvanco,
                  float proximidade, float anguloBolaGraus) {
     if (_estado == Estado::Avancando) {
-      if (!bolaValida || !bolaPerto || !isfinite(anguloBolaGraus)) {
+      if (!bolaValida || !bolaNaFaixaAvanco || !isfinite(anguloBolaGraus)) {
         _estado = Estado::Cooldown;
         _inicioEstadoMs = agoraMs;
         return false;
@@ -94,7 +94,7 @@ class AvancoBolaTemporizado {
       _estado = Estado::Inativo;
     }
 
-    const bool anguloEstavel = bolaValida && bolaPerto &&
+    const bool anguloEstavel = bolaValida && bolaNaFaixaAvanco &&
         isfinite(anguloBolaGraus) &&
         fabsf(erroAngular(anguloBolaGraus, 0.0f)) <=
             limiarAngular(proximidade);

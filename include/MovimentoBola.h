@@ -6,17 +6,17 @@
 #include <math.h>
 
 namespace MovimentoBola {
-constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 15.0f;
+constexpr float ANGULO_SETOR_FRONTAL_GRAUS = 8.0f;
 constexpr float ANGULO_LATERAL_GRAUS = 80.0f;
 constexpr float ANGULO_TRASEIRO_GRAUS = 180.0f;
 constexpr float ANGULO_ZONA_TRAVA_TRASEIRA_GRAUS = 165.0f;
 constexpr float DESVIO_J_LONGE_GRAUS = 4.0f;
-constexpr float DESVIO_J_MEDIA_GRAUS = 45.0f;
+constexpr float DESVIO_J_MEDIA_GRAUS = 50.0f;
 constexpr float DESVIO_J_PERTO_GRAUS = 60.0f;
 constexpr float ANGULO_REFERENCIA_J_GRAUS = 90.0f;
-constexpr float MOVIMENTO_J_LONGE_A_90_GRAUS = 100.0f;
-constexpr float MOVIMENTO_J_MEDIA_A_90_GRAUS = 120.0f;
-constexpr float MOVIMENTO_J_PERTO_A_90_GRAUS = 155.0f;
+constexpr float MOVIMENTO_J_LONGE_A_90_GRAUS = 105.0f;
+constexpr float MOVIMENTO_J_MEDIA_A_90_GRAUS = 125.0f;
+constexpr float MOVIMENTO_J_PERTO_A_90_GRAUS = 160.0f;
 
 class ControladorJ {
  public:
